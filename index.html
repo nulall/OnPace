@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OnPace</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/htm@3/dist/htm.umd.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #fff; color: #111; font-family: -apple-system, sans-serif; }
+    :root {
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --color-text-primary: #111;
+      --color-text-secondary: #666;
+      --color-text-tertiary: #999;
+      --color-text-inverse: #fff;
+      --color-text-info: #1a6fbd;
+      --color-text-success: #2e7d32;
+      --color-background-primary: #fff;
+      --color-background-secondary: #f5f5f5;
+      --color-background-inverse: #111;
+      --color-background-info: #e3f0fb;
+      --color-border-primary: #111;
+      --color-border-secondary: #ccc;
+      --color-border-tertiary: #e5e5e5;
+      --color-border-info: #1a6fbd;
+      --border-radius-md: 8px;
+      --border-radius-lg: 12px;
+    }
+    .btn         { padding:8px 14px; border-radius:8px; border:1px solid var(--color-border-secondary); background:none; cursor:pointer; font-size:13px; color:var(--color-text-primary); font-family:inherit; }
+    .btn-primary { padding:10px 18px; border-radius:8px; border:none; background:var(--color-text-primary); color:var(--color-background-primary); cursor:pointer; font-size:14px; font-weight:500; font-family:inherit; }
+    .inp         { width:100%; padding:8px 10px; border-radius:8px; border:1.5px solid var(--color-border-secondary); background:var(--color-background-primary); color:var(--color-text-primary); font-size:14px; box-sizing:border-box; margin-bottom:10px; font-family:inherit; }
+    .card        { background:var(--color-background-secondary); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
+    .lbl         { font-size:13px; color:var(--color-text-secondary); display:block; margin-bottom:4px; }
+    .tbtn        { padding:8px 12px; border-radius:8px; cursor:pointer; font-size:13px; border:1.5px solid var(--color-border-secondary); background:var(--color-background-primary); color:var(--color-text-primary); font-weight:400; font-family:inherit; }
+    .tbtn.on     { border:2px solid var(--color-text-primary); background:var(--color-text-primary); color:var(--color-background-primary); font-weight:700; }
+    .pill        { display:inline-block; padding:2px 8px; border-radius:20px; font-size:11px; font-weight:500; }
+    .pill-easy     { background:#E1F5EE; color:#0F6E56; }
+    .pill-tempo    { background:#FAEEDA; color:#854F0B; }
+    .pill-interval { background:#FAECE7; color:#993C1D; }
+    .pill-long     { background:#E6F1FB; color:#185FA5; }
+    .pill-rest     { background:#F5F5F5; color:#888780; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+// OnPace — running training plan
+
+const _start=(function(){return new Date().toISOString().slice(0,10);})();
+const _race=(function(){const d=new Date();d.setDate(d.getDate()+56);return d.toISOString().slice(0,10);})();
+
+const DEFAULTS = {
+  vdot:30, race:_race, rdist:"10k", start:_start,
+  slrd:5, dpw:4, lrd:6, taper:2, units:"mi", name:"", reps:4,
+  striders:false, customDist:"", dynamicWU:false, preStrides:false,
+  outBack:false, startTime:"06:00"
+};
+
+const VDOT_TABLE = {
+  30:{easy:"13:14",tempo:"11:12",interval:"10:22"},
+  31:{easy:"12:54",tempo:"10:54",interval:"10:06"},
+  32:{easy:"12:35",tempo:"10:37",interval:"9:51"},
+  33:{easy:"12:17",tempo:"10:21",interval:"9:37"},
+  34:{easy:"12:00",tempo:"10:06",interval:"9:23"},
+  35:{easy:"11:44",tempo:"9:52", interval:"9:11"},
+  36:{easy:"11:29",tempo:"9:39", interval:"8:59"},
+  37:{easy:"11:15",tempo:"9:26", interval:"8:48"},
+  38:{easy:"10:57",tempo:"9:14", interval:"8:37"},
+  39:{easy:"10:40",tempo:"9:02", interval:"8:27"},
+  40:{easy:"10:23",tempo:"8:51", interval:"8:17"},
+  42:{easy:"9:55", tempo:"8:31", interval:"7:59"},
+  44:{easy:"9:28", tempo:"8:14", interval:"7:42"},
+  46:{easy:"9:03", tempo:"7:51", interval:"7:26"},
+  48:{easy:"8:39", tempo:"7:28", interval:"7:05"},
+  50:{easy:"8:19", tempo:"7:07", interval:"6:46"},
+};
+const VDOT_RACE_TIMES = {
+  30:{"5k":2220,"8k":3660,"10k":4680,"15k":7140,"half":9900,"marathon":21000},
+  31:{"5k":2148,"8k":3540,"10k":4524,"15k":6900,"half":9576,"marathon":20280},
+  32:{"5k":2082,"8k":3432,"10k":4374,"15k":6672,"half":9264,"marathon":19620},
+  33:{"5k":2016,"8k":3324,"10k":4230,"15k":6456,"half":8964,"marathon":18996},
+  34:{"5k":1956,"8k":3222,"10k":4092,"15k":6252,"half":8676,"marathon":18396},
+  35:{"5k":1899,"8k":3126,"10k":3960,"15k":6054,"half":8400,"marathon":17820},
+  36:{"5k":1845,"8k":3036,"10k":3834,"15k":5868,"half":8136,"marathon":17268},
+  37:{"5k":1794,"8k":2952,"10k":3714,"15k":5694,"half":7884,"marathon":16740},
+  38:{"5k":1746,"8k":2874,"10k":3600,"15k":5526,"half":7644,"marathon":16236},
+  39:{"5k":1701,"8k":2796,"10k":3492,"15k":5370,"half":7416,"marathon":15756},
+  40:{"5k":1658,"8k":2724,"10k":3390,"15k":5220,"half":7200,"marathon":15300},
+  42:{"5k":1578,"8k":2592,"10k":3210,"15k":4932,"half":6804,"marathon":14460},
+  44:{"5k":1504,"8k":2472,"10k":3042,"15k":4668,"half":6432,"marathon":13680},
+  46:{"5k":1436,"8k":2358,"10k":2886,"15k":4422,"half":6084,"marathon":12960},
+  48:{"5k":1374,"8k":2256,"10k":2742,"15k":4194,"half":5760,"marathon":12300},
+  50:{"5k":1316,"8k":2160,"10k":2610,"15k":3984,"half":5460,"marathon":11700},
+};
+const VDOT_STRIDE = {
+  30:"8:08",31:"7:55",32:"7:42",33:"7:30",34:"7:19",35:"7:08",
+  36:"6:58",37:"6:49",38:"6:40",39:"6:31",40:"6:23",
+  42:"6:07",44:"5:53",46:"5:40",48:"5:28",50:"5:17"
+};
+const RACE_MI    = {"5k":3.1,"8k":4.97,"10k":6.21,"15k":9.32,"half":13.11,"marathon":26.22};
+const RACE_FLOOR = {"5k":0.90,"8k":0.92,"10k":0.95,"15k":0.90,"half":0.85,"marathon":0.75};
+const RACE_CEIL  = {"5k":1.3,"8k":1.35,"10k":1.4,"15k":1.35,"half":1.3,"marathon":1.2};
+const SPREAD     = {easy:40, long:40, tempo:30, interval:25, stride:25};
+const DAYS       = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const COLORS     = {
+  easy:     {bg:"#E1F5EE",fg:"#0F6E56",label:"Easy"},
+  tempo:    {bg:"#FAEEDA",fg:"#854F0B",label:"Tempo"},
+  interval: {bg:"#FAECE7",fg:"#993C1D",label:"Interval"},
+  long:     {bg:"#E6F1FB",fg:"#185FA5",label:"Long"},
+  rest:     {bg:"#F5F5F5",fg:"#888780",label:"Rest"},
+};
+const INTERVAL_MENU_MI = [0.25,0.375,0.5,0.625,0.75,1.0];
+const INTERVAL_LABELS  = {0.25:"400 m",0.375:"600 m",0.5:"800 m",0.625:"1000 m",0.75:"1200 m",1.0:"1 mi"};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function paceToSec(p){const s=p.split(":");return parseInt(s[0],10)*60+parseInt(s[1]||"0",10);}
+function secToPace(s){return Math.floor(s/60)+":"+(s%60<10?"0"+(s%60):s%60);}
+function spreadRange(pace,total){const m=paceToSec(pace),h=Math.round(total/2);return secToPace(m-h)+"–"+secToPace(m+h);}
+function spreadDisplay(pace,total){return pace+" ("+spreadRange(pace,total)+")";}
+
+function lerpKeys(keys, vdot) {
+  let lo = keys[0], hi = keys[keys.length - 1];
+  for (let i = 0; i < keys.length; i++) {
+    if (keys[i] <= vdot) lo = keys[i];
+    if (keys[i] >= vdot && keys[i] < hi) hi = keys[i];
+  }
+  return { lo, hi, t: lo === hi ? 0 : (vdot - lo) / (hi - lo) };
+}
+function getPace(vdot, type) {
+  if (type === "stride") {
+    const sk = Object.keys(VDOT_STRIDE).map(Number).sort((a,b) => a-b);
+    const {lo, hi, t} = lerpKeys(sk, vdot);
+    if (lo === hi) return VDOT_STRIDE[lo] || "6:23";
+    return secToPace(Math.round(paceToSec(VDOT_STRIDE[lo]) + t * (paceToSec(VDOT_STRIDE[hi]) - paceToSec(VDOT_STRIDE[lo]))));
+  }
+  const keys = Object.keys(VDOT_TABLE).map(Number).sort((a,b) => a-b);
+  const {lo, hi, t} = lerpKeys(keys, vdot);
+  const col = type === "long" ? "easy" : type;
+  if (lo === hi) return VDOT_TABLE[lo][col] || "10:00";
+  return secToPace(Math.round(paceToSec(VDOT_TABLE[lo][col]) + t * (paceToSec(VDOT_TABLE[hi][col]) - paceToSec(VDOT_TABLE[lo][col]))));
+}
+function getRaceTimeSec(vdot, rdist) {
+  const keys = Object.keys(VDOT_RACE_TIMES).map(Number).sort((a,b) => a-b);
+  const {lo, hi, t} = lerpKeys(keys, vdot);
+  const loVal = (VDOT_RACE_TIMES[lo] || {})[rdist]; if (!loVal) return null;
+  if (lo === hi) return loVal;
+  const hiVal = VDOT_RACE_TIMES[hi][rdist]; if (!hiVal) return loVal;
+  return Math.round(loVal + t * (hiVal - loVal));
+}
+function fmtRaceTime(sec){const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=sec%60;return h>0?h+":"+(m<10?"0"+m:m)+":"+(s<10?"0"+s:s):m+":"+(s<10?"0"+s:s);}
+function getRacePaceMi(vdot,rdist,units){
+  const sec=getRaceTimeSec(vdot,rdist);if(!sec)return null;
+  const mi=RACE_MI[rdist];if(!mi)return null;
+  return secToPace(Math.round(units==="km"?sec/(mi*1.60934):sec/mi));
+}
+function getRecoveryRange(vdot){const e=paceToSec(getPace(vdot,"easy"));return secToPace(e-20)+"–"+secToPace(e+200);}
+function getWUCD(cfg){return (cfg.dynamicWU===true||cfg.dynamicWU==="true")?{type:"dist",val:"1.00"}:{type:"time",val:"10:00"};}
+function wuStep(wu,ep,units){return wu.type==="dist"?"Run "+wu.val+" "+units+" @ "+ep:"Run "+wu.val+" @ "+ep;}
+function addDays(base,n){const d=new Date(base+"T12:00:00");d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);}
+function fmtDate(s){const d=new Date(s+"T12:00:00");return(d.getMonth()+1)+"/"+d.getDate();}
+function fmtDateLong(s){return new Date(s+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});}
+function fmtDateFull(s){return new Date(s+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"});}
+function weeksUntil(s){const now=new Date();now.setHours(0,0,0,0);return Math.max(0,Math.ceil((new Date(s+"T12:00:00")-now)/604800000));}
+function encodeParams(cfg){
+  const keys=["vdot","race","rdist","start","slrd","dpw","lrd","taper","units","name","reps","striders","customDist","dynamicWU","preStrides","outBack","startTime"];
+  return "#?"+keys.map(function(k){return k+"="+encodeURIComponent(cfg[k]);}).join("&");
+}
+function snapRep(raw){let b=INTERVAL_MENU_MI[0],bd=Math.abs(raw-b);for(let i=1;i<INTERVAL_MENU_MI.length;i++){const d=Math.abs(raw-INTERVAL_MENU_MI[i]);if(d<bd){bd=d;b=INTERVAL_MENU_MI[i];}}return b;}
+function calcRest(repMi,pace){return Math.min(120,Math.max(30,Math.round(repMi*paceToSec(pace)/2)));}
+function tempoMins(dist,pace){return Math.round(dist*paceToSec(pace)/60);}
+function getRaceMi(cfg){if(cfg.rdist==="custom"){const v=parseFloat(cfg.customDist);return isNaN(v)?6.2:v;}return RACE_MI[cfg.rdist]||6.2;}
+function isOn(v){return v===true||v==="true";}
+
+// Returns {lo, hi} total minutes for a workout
+function workoutTimeRange(d, cfg) {
+  const sp=SPREAD[d.type]||25, pSec=paceToSec(d.pace), h=Math.round(sp/2);
+  const hasStriders=isOn(cfg.striders);
+  const WU=10, CD=10; // minutes
+  if(d.type==="easy"||d.type==="long"){
+    let lo=Math.round(d.dist*(pSec-h)/60), hi=Math.round(d.dist*(pSec+h)/60);
+    if(hasStriders){lo+=4*0.5+3*1;hi+=4*0.5+3*1;} // 4×30s strides + 3×1min recovery
+    return{lo,hi};
+  }
+  if(d.type==="tempo"){
+    const lo=WU+Math.round(d.dist*(pSec-h)/60)+CD;
+    const hi=WU+Math.round(d.dist*(pSec+h)/60)+CD;
+    return{lo,hi};
+  }
+  if(d.type==="interval"){
+    const reps=Number(cfg.reps)||4, snapped=snapRep(d.dist/reps);
+    const rm=calcRest(snapped,d.pace)/60;
+    const lo=Math.round(WU+(snapped*(pSec-h)/60+rm)*reps+CD);
+    const hi=Math.round(WU+(snapped*(pSec+h)/60+rm)*reps+CD);
+    return{lo,hi};
+  }
+  return{lo:30,hi:45};
+}
+
+function makeSuffix(d, cfg) {
+  const {lo,hi}=workoutTimeRange(d,cfg);
+  const u=cfg.units;
+  if(d.type==="easy"||d.type==="long") return d.dist+" "+u+" ["+lo+"-"+hi+" min]";
+  if(d.type==="tempo"){const mins=tempoMins(d.dist,d.pace);return mins+" min tempo ["+lo+"-"+hi+" min total]";}
+  if(d.type==="interval"){
+    const reps=Number(cfg.reps)||4, snapped=snapRep(d.dist/reps);
+    const label=INTERVAL_LABELS[snapped]||snapped.toFixed(2)+" mi";
+    return reps+"× "+label+" ["+lo+"-"+hi+" min]";
+  }
+  return d.dist+" "+u;
+}
+
+function icsEventName(d, cfg) {
+  const u=cfg.units;
+  if(d.type==="easy")     return "Run: Easy ("+d.dist+" "+u+")";
+  if(d.type==="long")     return "Run: Long ("+d.dist+" "+u+")";
+  if(d.type==="tempo")    return "Run: Tempo ("+d.dist+" "+u+")";
+  if(d.type==="interval"){
+    const reps=Number(cfg.reps)||4, snapped=snapRep(d.dist/reps);
+    const label=INTERVAL_LABELS[snapped]||snapped.toFixed(2)+" mi";
+    return "Run: Intervals ("+reps+"× "+label+")";
+  }
+  return "Run";
+}
+
+function makeSteps(d, cfg) {
+  const u=cfg.units;
+  const ep=spreadRange(getPace(cfg.vdot,"easy"),SPREAD.easy);
+  const pr=spreadRange(d.pace,SPREAD[d.type]||25);
+  const strPr=spreadRange(getPace(cfg.vdot,"stride"),SPREAD.stride);
+  const recRange=getRecoveryRange(cfg.vdot);
+  const hasStriders=isOn(cfg.striders), hasPreStrides=isOn(cfg.preStrides);
+  const ob=isOn(cfg.outBack);
+  const wu=getWUCD(cfg), wuLine=wuStep(wu,ep,u);
+
+  if(d.type==="easy"||d.type==="long"){
+    const half=Math.round(d.dist/2*10)/10;
+    const steps=ob
+      ?["Run "+half.toFixed(2)+" "+u+" @ "+ep+" [out]","Run "+half.toFixed(2)+" "+u+" @ "+ep+" [back]"]
+      :["Run "+d.dist.toFixed(2)+" "+u+" @ "+ep];
+    if(hasStriders){for(let i=0;i<4;i++){steps.push("Run 0:30 @ "+strPr);if(i<3)steps.push("Run 1:00 @ "+recRange);}}
+    return steps;
+  }
+  if(d.type==="tempo"){
+    const mins=tempoMins(d.dist,d.pace);
+    const halfMins=Math.round(mins/2);
+    const steps=[wuLine];
+    if(hasPreStrides){for(let i=0;i<4;i++){steps.push("Run 0:25 @ "+strPr);if(i<3)steps.push("Run 1:00 @ "+recRange);}}
+    if(ob){steps.push("Run "+halfMins+":00 @ "+pr+" [out]","Run "+halfMins+":00 @ "+pr+" [back]");}
+    else{steps.push("Run "+mins+":00 @ "+pr);}
+    steps.push(wuLine);
+    return steps;
+  }
+  if(d.type==="interval"){
+    const reps=Number(cfg.reps)||4, snapped=snapRep(d.dist/reps);
+    const label=INTERVAL_LABELS[snapped]||snapped.toFixed(2)+" mi";
+    const rst=secToPace(calcRest(snapped,d.pace));
+    const steps=[wuLine];
+    if(hasPreStrides){for(let i=0;i<4;i++){steps.push("Run 0:25 @ "+strPr);if(i<3)steps.push("Run 1:00 @ "+recRange);}}
+    steps.push("Repeat "+reps,"Run "+label+" @ "+pr,"Run "+rst+" @ "+recRange,"End Repeat",wuLine);
+    return steps;
+  }
+  return["Run "+d.dist.toFixed(2)+" "+u+" @ "+ep];
+}
+
+function makeIMW(plan, cfg, sel) {
+  const out=[];
+  plan.forEach(function(w){
+    w.days.forEach(function(d){
+      if(d.type==="rest"||!sel[d.date])return;
+      out.push("# Date: "+d.date);
+      out.push("# Name: "+icsEventName(d,cfg));
+      makeSteps(d,cfg).forEach(function(s){out.push(s);});
+      out.push("");
+    });
+  });
+  return out.join("\n").trim();
+}
+
+function pad2(n){return n<10?"0"+n:String(n);}
+
+function makeICS(plan, cfg, sel) {
+  const lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//OnPace//EN","CALSCALE:GREGORIAN"];
+  const racePace=getRacePaceMi(cfg.vdot,cfg.rdist,cfg.units);
+  const timeParts=(cfg.startTime||"06:00").split(":");
+  const startH=parseInt(timeParts[0],10)||6, startM=parseInt(timeParts[1],10)||0;
+
+  plan.forEach(function(w){
+    w.days.forEach(function(d){
+      if(d.type==="rest"||!sel[d.date])return;
+      const uid=d.date+"-"+d.type+"-"+Math.random().toString(36).slice(2)+"@onpace";
+      const {hi}=workoutTimeRange(d,cfg);
+      const dtDate=d.date.replace(/-/g,"");
+      const startTotalMin=startH*60+startM;
+      const endTotalMin=startTotalMin+hi;
+      const endH=Math.floor(endTotalMin/60)%24, endM=endTotalMin%60;
+      const dtStart=dtDate+"T"+pad2(startH)+pad2(startM)+"00";
+      const dtEnd=dtDate+"T"+pad2(endH)+pad2(endM)+"00";
+      const steps=makeSteps(d,cfg);
+      const desc=fmtDateFull(d.date)+"\\n"+makeSuffix(d,cfg)+"\\n\\n"+steps.join("\\n");
+      lines.push("BEGIN:VEVENT","UID:"+uid,
+        "DTSTART:"+dtStart,"DTEND:"+dtEnd,
+        "SUMMARY:"+icsEventName(d,cfg),
+        "DESCRIPTION:"+desc,"END:VEVENT");
+    });
+  });
+
+  // Race event
+  const raceSec=getRaceTimeSec(cfg.vdot,cfg.rdist);
+  if(raceSec&&cfg.rdist!=="custom"){
+    const rdist=cfg.rdist==="half"?"Half Marathon":cfg.rdist==="marathon"?"Marathon":cfg.rdist.toUpperCase();
+    const raceDesc="Goal: "+fmtRaceTime(raceSec)+(racePace?" @ "+racePace+"/"+cfg.units:"")+"\\nVDOT "+cfg.vdot+" · OnPace";
+    lines.push("BEGIN:VEVENT","UID:race-"+cfg.race+"@onpace",
+      "DTSTART;VALUE=DATE:"+cfg.race.replace(/-/g,""),
+      "SUMMARY:🏁 "+rdist+" — Goal "+fmtRaceTime(raceSec),
+      "DESCRIPTION:"+raceDesc,"END:VEVENT");
+  }
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n");
+}
+
+function dlFile(content,name,mime){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([content],{type:mime}));a.download=name;a.click();}
+
+function computePeakLong(startLong, dpw, raceMi, rdist) {
+  const volCap = (startLong * 1.3 + (dpw - 1) * startLong * 0.65) * 0.30;
+  const floor  = raceMi * (RACE_FLOOR[rdist] || 0.95);
+  const ceil   = raceMi * (RACE_CEIL[rdist]  || 1.4);
+  return Math.min(ceil, Math.max(startLong, volCap, floor));
+}
+
+function buildRunDays(lrd, dpw) {
+  const others = []; for (let i = 1; i <= 6; i++) others.push((lrd + i) % 7);
+  const slots = dpw - 1, extra = [];
+  if (slots > 0) {
+    const step = 6 / slots;
+    for (let i = 0; i < slots; i++)
+      extra.push(others[Math.min(Math.floor(i * step + step / 2), others.length - 1)]);
+  }
+  const rdSet = {}; rdSet[lrd] = true; extra.forEach(x => { rdSet[x] = true; });
+  const runDays   = Object.keys(rdSet).map(Number).sort((a, b) => a - b);
+  const runNoLong = runDays.filter(x => x !== lrd);
+  return { rdSet, runNoLong };
+}
+
+function assignWorkoutType(d, lrd, dpw, runNoLong, isTaper) {
+  if (d === lrd) return "long";
+  const ri = runNoLong.indexOf(d);
+  if (ri === 0 && dpw >= 3 && !isTaper) return "tempo";
+  if (ri === 1 && dpw >= 4 && !isTaper) return "interval";
+  return "easy";
+}
+
+function buildWeekDays(ws, rdSet, runNoLong, cfg, longDist, isTaper) {
+  const lrd = Number(cfg.lrd), dpw = Number(cfg.dpw);
+  const wsDow = new Date(ws + "T12:00:00").getDay();
+  let weekMile = 0;
+  const days = Array.from({ length: 7 }, (_, d) => {
+    const date = addDays(ws, d - wsDow);
+    if (!rdSet[d]) return { type:"rest", dow:d, date };
+    const type = assignWorkoutType(d, lrd, dpw, runNoLong, isTaper);
+    const pace  = getPace(cfg.vdot, type === "long" ? "easy" : type);
+    const dist  = type === "long"     ? longDist
+      : type === "tempo"    ? Math.max(2,   Math.round(longDist * 0.55 * 10) / 10)
+      : type === "interval" ? Math.max(1.5, Math.round(longDist * 0.4  * 10) / 10)
+      :                       Math.max(2,   Math.round(longDist * 0.6  * 10) / 10);
+    weekMile += dist;
+    return { type, dow:d, date, dist, pace };
+  });
+  return { days, weekMile: Math.round(weekMile * 10) / 10 };
+}
+
+function buildPlan(cfg) {
+  const totalWeeks  = Math.max(4, Math.round((new Date(cfg.race + "T12:00:00") - new Date(cfg.start + "T12:00:00")) / 604800000));
+  const taper       = Math.min(cfg.taper, 2), buildWeeks = totalWeeks - taper;
+  const startLong   = Number(cfg.slrd);
+  const peakLong    = computePeakLong(startLong, Number(cfg.dpw), getRaceMi(cfg), cfg.rdist);
+  const { rdSet, runNoLong } = buildRunDays(Number(cfg.lrd), Number(cfg.dpw));
+
+  return Array.from({ length: totalWeeks }, (_, w) => {
+    const isTaper = w >= buildWeeks;
+    const prog    = buildWeeks > 1 ? w / (buildWeeks - 1) : 1;
+    const taperF  = 1 - ((w - buildWeeks + 1) / (taper + 1)) * 0.35;
+    let longDist  = isTaper ? peakLong * taperF : startLong + prog * (peakLong - startLong);
+    longDist      = Math.max(startLong * 0.8, Math.round(longDist * 10) / 10);
+    const ws      = addDays(cfg.start, w * 7);
+    const { days, weekMile } = buildWeekDays(ws, rdSet, runNoLong, cfg, longDist, isTaper);
+    return { week: w + 1, weekStart: ws, isTaper, days, longDist, weekMile };
+  });
+}
+
+// ─── React ────────────────────────────────────────────────────────────────────
+
+const html = htm.bind(React.createElement);
+const {useState, useEffect} = React;
+
+// ── Module-level date-set utilities ──────────────────────────────────────────
+
+function allDates(plan) {
+  const r = {}; plan.forEach(w => w.days.forEach(d => { if (d.type !== "rest") r[d.date] = true; })); return r;
+}
+function remDates(plan, today) {
+  const r = {}; plan.forEach(w => w.days.forEach(d => { if (d.type !== "rest" && d.date >= today) r[d.date] = true; })); return r;
+}
+function wkDates(plan, today) {
+  const r = {}, cw = plan.find(w => w.weekStart <= today && addDays(w.weekStart, 6) >= today);
+  if (cw) cw.days.forEach(d => { if (d.type !== "rest") r[d.date] = true; }); return r;
+}
+function nxtRun(plan, today) {
+  for (let i = 0; i < plan.length; i++)
+    for (let j = 0; j < plan[i].days.length; j++) {
+      const d = plan[i].days[j]; if (d.type !== "rest" && d.date >= today) return { [d.date]: true };
+    }
+  return {};
+}
+
+// ── Error boundary ────────────────────────────────────────────────────────────
+
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(err) { return { error: err }; }
+  render() {
+    if (this.state.error) return html`
+      <div style=${{ padding:32, textAlign:"center", fontFamily:"var(--font-sans)" }}>
+        <p style=${{ fontSize:16, fontWeight:600, marginBottom:8 }}>Something went wrong</p>
+        <p style=${{ fontSize:13, color:"var(--color-text-secondary)", margin:"0 auto 16px", maxWidth:300 }}>
+          ${this.state.error.message}
+        </p>
+        <button className="btn" onClick=${() => this.setState({ error:null })}>Try again</button>
+      </div>`;
+    return this.props.children;
+  }
+}
+
+// ── Shared components ─────────────────────────────────────────────────────────
+
+function Pill({ type }) {
+  return html`<span className=${`pill pill-${type}`}>${COLORS[type].label}</span>`;
+}
+
+function TBtn({ active, onClick, children, style }) {
+  return html`<button onClick=${onClick} className=${"tbtn" + (active ? " on" : "")} style=${style || {}}>${children}</button>`;
+}
+
+// ── Tab components ────────────────────────────────────────────────────────────
+
+function Dashboard({ today, cfg, nextRunDay, curWeekIdx, planLength, raceTimeStr, racePaceMi }) {
+  const paces = [
+    { label:"Stride",      pace:getPace(cfg.vdot,"stride"),   spread:SPREAD.stride,   type:"stride",   dim:!isOn(cfg.striders) },
+    { label:"Interval",    pace:getPace(cfg.vdot,"interval"), spread:SPREAD.interval, type:"interval" },
+    { label:"Tempo",       pace:getPace(cfg.vdot,"tempo"),    spread:SPREAD.tempo,    type:"tempo" },
+    { label:"Easy / Long", pace:getPace(cfg.vdot,"easy"),     spread:SPREAD.easy,     type:"easy" },
+  ];
+  return html`
+    <div style=${{ padding:16 }}>
+      ${nextRunDay && html`
+        <div className="card" style=${{ border:"1.5px solid var(--color-border-info)" }}>
+          <p style=${{ fontSize:11, fontWeight:600, textTransform:"uppercase", letterSpacing:"0.06em", color:"var(--color-text-info)", margin:"0 0 4px" }}>Next Run</p>
+          <p style=${{ fontSize:17, fontWeight:600, margin:"0 0 4px" }}>${fmtDateLong(nextRunDay.date)}</p>
+          <div style=${{ display:"flex", alignItems:"center", gap:8 }}>
+            <${Pill} type=${nextRunDay.type} />
+            <span style=${{ fontSize:14, color:"var(--color-text-secondary)" }}>${nextRunDay.dist} ${cfg.units} · ${nextRunDay.pace}/${cfg.units}</span>
+          </div>
+        </div>
+      `}
+      ${raceTimeStr && cfg.rdist !== "custom" && html`
+        <div className="card" style=${{ border:"1.5px solid #b08040", background:"#fdf6ec" }}>
+          <p style=${{ fontSize:11, fontWeight:600, textTransform:"uppercase", letterSpacing:"0.06em", color:"#8a5c00", margin:"0 0 4px" }}>Goal ${cfg.rdist.toUpperCase()} Time</p>
+          <p style=${{ fontSize:22, fontWeight:700, color:"#6b4400", margin:"0 0 2px" }}>${raceTimeStr}</p>
+          ${racePaceMi && html`<p style=${{ fontSize:13, color:"#8a5c00", margin:0 }}>${spreadDisplay(racePaceMi, SPREAD.tempo)} / ${cfg.units} race pace</p>`}
+        </div>
+      `}
+      <div style=${{ display:"flex", gap:10, marginBottom:10 }}>
+        <div className="card" style=${{ flex:1, marginBottom:0 }}>
+          <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 2px" }}>Plan progress</p>
+          <p style=${{ fontSize:20, fontWeight:500, margin:0 }}>Wk ${curWeekIdx + 1} / ${planLength}</p>
+        </div>
+        <div className="card" style=${{ flex:1, marginBottom:0 }}>
+          <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 2px" }}>VDOT</p>
+          <p style=${{ fontSize:20, fontWeight:500, margin:0 }}>${cfg.vdot}</p>
+        </div>
+      </div>
+      <div style=${{ display:"flex", gap:10, marginBottom:10 }}>
+        <div className="card" style=${{ flex:1, marginBottom:0 }}>
+          <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 2px" }}>Starting long run</p>
+          <p style=${{ fontSize:20, fontWeight:500, margin:0 }}>${cfg.slrd} ${cfg.units}</p>
+        </div>
+        <div className="card" style=${{ flex:1, marginBottom:0 }}>
+          <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 2px" }}>Days/week</p>
+          <p style=${{ fontSize:20, fontWeight:500, margin:0 }}>${cfg.dpw}</p>
+        </div>
+      </div>
+      <div className="card">
+        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em" }}>Training paces / ${cfg.units}</p>
+        ${paces.map(p => html`
+          <div key=${p.label} style=${{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:7, opacity:p.dim ? 0.35 : 1 }}>
+            <span className=${`pill pill-${p.type}`}>${p.label}</span>
+            <span style=${{ fontSize:13, color:"var(--color-text-primary)", fontFamily:"monospace" }}>${spreadDisplay(p.pace, p.spread)}</span>
+          </div>
+        `)}
+      </div>
+    </div>
+  `;
+}
+
+function Plan({ today, cfg, plan, wk, selWeek, setSelWeek }) {
+  if (!wk) return null;
+  return html`
+    <div style=${{ padding:16 }}>
+      <div style=${{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+        <button className="btn" onClick=${() => setSelWeek(w => Math.max(0, w - 1))} disabled=${selWeek === 0}>‹</button>
+        <div style=${{ textAlign:"center" }}>
+          <div style=${{ fontSize:14, fontWeight:500 }}>Week ${selWeek + 1} of ${plan.length}${wk.isTaper ? " · Taper" : ""}</div>
+          <div style=${{ fontSize:11, color:"var(--color-text-secondary)" }}>${fmtDate(wk.weekStart)}–${fmtDate(addDays(wk.weekStart, 6))} · ${wk.weekMile} ${cfg.units}</div>
+        </div>
+        <button className="btn" onClick=${() => setSelWeek(w => Math.min(plan.length - 1, w + 1))} disabled=${selWeek === plan.length - 1}>›</button>
+      </div>
+      ${wk.days.map((d, i) => {
+        const isToday = d.date === today;
+        return html`
+          <div key=${i} style=${{
+            borderRadius:8, padding:"10px 12px", marginBottom:7,
+            border:     isToday ? "2px solid var(--color-text-info)" : "0.5px solid var(--color-border-tertiary)",
+            background: isToday ? "var(--color-background-info)" : "var(--color-background-primary)",
+            boxShadow:  isToday ? "0 0 0 1px var(--color-border-info)" : "none",
+          }}>
+            <div style=${{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span>
+                <span style=${{ fontSize:13, fontWeight:isToday?700:500, color:isToday?"var(--color-text-info)":"var(--color-text-primary)" }}>${DAYS[d.dow]} </span>
+                <span style=${{ fontSize:11, color:isToday?"var(--color-text-info)":"var(--color-text-secondary)" }}>${fmtDate(d.date)}</span>
+                ${isToday && html`<span style=${{ fontSize:10, color:"var(--color-text-info)", marginLeft:6, fontWeight:700, textTransform:"uppercase" }}>· Today</span>`}
+              </span>
+              <${Pill} type=${d.type} />
+            </div>
+            ${d.type !== "rest" && html`
+              <div style=${{ marginTop:5, fontSize:13, color:isToday?"var(--color-text-info)":"var(--color-text-secondary)" }}>${d.dist} ${cfg.units} · ${d.pace}/${cfg.units}</div>
+            `}
+          </div>
+        `;
+      })}
+      <div style=${{ display:"flex", gap:6, marginTop:12, flexWrap:"wrap" }}>
+        ${plan.map((w, i) => {
+          const cur = w.weekStart <= today && addDays(w.weekStart, 6) >= today;
+          return html`
+            <button key=${i} onClick=${() => setSelWeek(i)} style=${{
+              width:30, height:30, borderRadius:6, cursor:"pointer", fontSize:11,
+              border:     i === selWeek ? "2px solid var(--color-text-primary)" : "1px solid var(--color-border-tertiary)",
+              background: cur ? "var(--color-background-info)" : i === selWeek ? "var(--color-background-secondary)" : "none",
+              color:"var(--color-text-primary)", fontWeight:i === selWeek ? 700 : 400,
+            }}>${i + 1}</button>
+          `;
+        })}
+      </div>
+    </div>
+  `;
+}
+
+function Export({ today, cfg, plan, sel, setSel, selCount, raceTimeStr, copied, setCopied }) {
+  const imwText = makeIMW(plan, cfg, sel);
+  function copyIMW() {
+    try { navigator.clipboard.writeText(imwText).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2500); }); } catch(e) {}
+  }
+  function doICS() { dlFile(makeICS(plan, cfg, sel), (cfg.name ? cfg.name + "_" : "") + "OnPace.ics", "text/calendar"); }
+  const presets = [
+    ["Everything", () => allDates(plan)],
+    ["Remaining",  () => remDates(plan, today)],
+    ["This week",  () => wkDates(plan, today)],
+    ["Next run",   () => nxtRun(plan, today)],
+    ["None",       () => ({})],
+  ];
+  return html`
+    <div style=${{ padding:16 }}>
+      <p style=${{ fontSize:15, fontWeight:500, margin:"0 0 14px" }}>Export plan</p>
+      <div className="card">
+        <p style=${{ fontSize:11, fontWeight:600, textAlign:"center", letterSpacing:"0.06em", textTransform:"uppercase", color:"var(--color-text-secondary)", margin:"0 0 8px" }}>Calendar (.ics)</p>
+        ${raceTimeStr && cfg.rdist !== "custom" && html`
+          <p style=${{ fontSize:12, color:"var(--color-text-secondary)", margin:"0 0 8px" }}>Includes race event: ${cfg.rdist.toUpperCase()} goal ${raceTimeStr}</p>
+        `}
+        <button className="btn-primary" style=${{ width:"100%" }} onClick=${doICS} disabled=${selCount === 0}>Download .ics</button>
+      </div>
+      <div className="card">
+        <p style=${{ fontSize:11, fontWeight:600, textAlign:"center", letterSpacing:"0.06em", textTransform:"uppercase", color:"var(--color-text-secondary)", margin:"0 0 8px" }}>
+          <a href="https://importmyworkout.com" target="_blank" rel="noreferrer" style=${{ color:"inherit", textDecoration:"underline", textDecorationColor:"rgba(128,128,128,0.35)" }}>importmyworkout.com</a>
+        </p>
+        <div style=${{ background:"#1a1a2e", borderRadius:8, border:"1.5px solid #3a3a5c" }}>
+          <div style=${{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"7px 10px 6px", borderBottom:"1px solid #2e2e4a", background:"#16162a", borderRadius:"8px 8px 0 0" }}>
+            <span style=${{ fontSize:10, color:"#8888aa", letterSpacing:"0.08em", fontFamily:"monospace", textTransform:"uppercase" }}>${selCount} workout${selCount !== 1 ? "s" : ""} selected</span>
+            <button onClick=${copyIMW} disabled=${selCount === 0} style=${{
+              background:copied?"#2e7d32":"#2a2a4a", border:"1px solid #4a4a6a", borderRadius:6,
+              color:copied?"#a5d6a7":"#aaaacc", fontSize:11, padding:"3px 10px", cursor:"pointer", fontFamily:"monospace",
+            }}>${copied ? "✓ copied" : "copy"}</button>
+          </div>
+          <pre style=${{ fontSize:11, color:"#c8d0e8", margin:0, padding:"10px 12px", whiteSpace:"pre-wrap", lineHeight:1.75, fontFamily:"monospace", maxHeight:200, overflowY:"auto" }}>${selCount === 0 ? "# No workouts selected." : imwText}</pre>
+        </div>
+      </div>
+      <div style=${{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
+        ${presets.map(([label, fn]) => html`
+          <button key=${label} className="btn" style=${{ fontSize:12, padding:"6px 12px" }} onClick=${() => setSel(fn())}>${label}</button>
+        `)}
+      </div>
+      <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px" }}>${selCount} workout${selCount !== 1 ? "s" : ""} selected</p>
+      ${plan.map((w, wi) => {
+        const workouts = w.days.filter(d => d.type !== "rest");
+        const allSel   = workouts.every(d =>  sel[d.date]);
+        const anySel   = workouts.some(d  =>  sel[d.date]);
+        return html`
+          <div key=${wi} className="card" style=${{ padding:"10px 14px", marginBottom:8 }}>
+            <label style=${{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", marginBottom:workouts.length ? 8 : 0 }}>
+              <input type="checkbox" checked=${allSel}
+                ref=${el => { if (el) el.indeterminate = anySel && !allSel; }}
+                onChange=${() => {
+                  const next = Object.assign({}, sel);
+                  workouts.forEach(d => { allSel ? delete next[d.date] : next[d.date] = true; });
+                  setSel(next);
+                }}
+                style=${{ width:16, height:16 }} />
+              <span style=${{ fontSize:13, fontWeight:500 }}>Week ${w.week}${w.isTaper ? " · Taper" : ""}</span>
+              <span style=${{ fontSize:11, color:"var(--color-text-secondary)" }}>${fmtDate(w.weekStart)}</span>
+            </label>
+            ${workouts.map((d, di) => html`
+              <label key=${di} style=${{ display:"flex", alignItems:"center", gap:10, padding:"5px 0", borderTop:"0.5px solid var(--color-border-tertiary)", cursor:"pointer" }}>
+                <input type="checkbox" checked=${!!sel[d.date]}
+                  onChange=${() => { const next = Object.assign({}, sel); sel[d.date] ? delete next[d.date] : next[d.date] = true; setSel(next); }}
+                  style=${{ width:15, height:15, flexShrink:0 }} />
+                <span style=${{ fontSize:12, color:"var(--color-text-secondary)", minWidth:56 }}>${DAYS[d.dow]} ${fmtDate(d.date)}</span>
+                <${Pill} type=${d.type} />
+                <span style=${{ fontSize:12, color:"var(--color-text-secondary)", marginLeft:"auto" }}>${d.dist} ${cfg.units}</span>
+              </label>
+            `)}
+          </div>
+        `;
+      })}
+    </div>
+  `;
+}
+
+function Settings({ cfg, setCfg, shareMsg, share }) {
+  const [loc, setLoc] = useState(Object.assign({}, cfg));
+  const fN   = k => e  => setLoc(l => ({ ...l, [k]: Number(e.target.value) }));
+  const fS   = k => e  => setLoc(l => ({ ...l, [k]: e.target.value }));
+  const pick = (k, v) => () => setLoc(l => ({ ...l, [k]: v }));
+  const tog  = (k, v) => () => setLoc(l => ({ ...l, [k]: v }));
+  const DIST_OPTIONS = ["5k","8k","10k","15k","half","marathon","custom"];
+  const previewSec  = getRaceTimeSec(loc.vdot, loc.rdist);
+  const previewPace = getRacePaceMi(loc.vdot, loc.rdist, loc.units);
+
+  return html`
+    <div style=${{ padding:16 }}>
+      <p style=${{ fontSize:15, fontWeight:500, margin:"0 0 16px" }}>Plan settings</p>
+
+      <label className="lbl">VDOT score
+        <a href="https://runsmartproject.com/calculator/" target="_blank" rel="noreferrer"
+          style=${{ fontSize:11, color:"var(--color-text-info)", marginLeft:6 }}>→ Calculator</a>
+      </label>
+      <div style=${{ display:"flex", alignItems:"center", gap:12, marginBottom:4 }}>
+        <input type="range" min="30" max="55" step="1" value=${loc.vdot} onChange=${fN("vdot")} style=${{ flex:1 }} />
+        <span style=${{ fontSize:14, fontWeight:500, minWidth:28 }}>${loc.vdot}</span>
+      </div>
+      ${previewSec && loc.rdist !== "custom"
+        ? html`<p style=${{ fontSize:12, color:"var(--color-text-secondary)", margin:"0 0 12px" }}>
+            Predicted ${loc.rdist.toUpperCase()}: ${fmtRaceTime(previewSec)}${previewPace ? " @ " + previewPace + "/" + loc.units + " race pace" : ""}
+          </p>`
+        : html`<div style=${{ marginBottom:12 }}></div>`
+      }
+
+      <label className="lbl">Race date</label>
+      <input type="date" className="inp" value=${loc.race} onChange=${fS("race")} />
+
+      <label className="lbl">Race distance</label>
+      <div style=${{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:loc.rdist === "custom" ? 8 : 12 }}>
+        ${DIST_OPTIONS.map(v => html`<${TBtn} key=${v} active=${loc.rdist === v} onClick=${pick("rdist", v)} style=${{ padding:"6px 12px", fontSize:12 }}>${v}</${TBtn}>`)}
+      </div>
+      ${loc.rdist === "custom" && html`
+        <input type="text" className="inp" value=${loc.customDist} onChange=${fS("customDist")} placeholder="Distance in miles (e.g. 7.5)" />
+      `}
+
+      <label className="lbl">Plan start date</label>
+      <input type="date" className="inp" value=${loc.start} onChange=${fS("start")} />
+
+      <label className="lbl">Starting long run (${loc.units})</label>
+      <input type="number" className="inp" min="1" max="30" step="0.5" value=${loc.slrd} onChange=${fN("slrd")} />
+
+      <label className="lbl">Days per week</label>
+      <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+        ${[3,4,5,6].map(n => html`<${TBtn} key=${n} active=${loc.dpw === n} onClick=${pick("dpw", n)} style=${{ flex:1 }}>${n}</${TBtn}>`)}
+      </div>
+
+      <label className="lbl">Long run day</label>
+      <div style=${{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" }}>
+        ${[0,1,2,3,4,5,6].map(d => html`<${TBtn} key=${d} active=${loc.lrd === d} onClick=${pick("lrd", d)} style=${{ padding:"6px 10px", fontSize:12 }}>${DAYS[d]}</${TBtn}>`)}
+      </div>
+
+      <label className="lbl">Taper weeks</label>
+      <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+        ${[1,2].map(n => html`<${TBtn} key=${n} active=${loc.taper === n} onClick=${pick("taper", n)} style=${{ flex:1 }}>${n} week${n > 1 ? "s" : ""}</${TBtn}>`)}
+      </div>
+
+      <label className="lbl">Units</label>
+      <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+        ${["mi","km"].map(u => html`<${TBtn} key=${u} active=${loc.units === u} onClick=${pick("units", u)} style=${{ flex:1 }}>${u}</${TBtn}>`)}
+      </div>
+
+      <label className="lbl">Plan name (optional)</label>
+      <input type="text" className="inp" value=${loc.name} onChange=${fS("name")} placeholder="e.g. Peachtree Road Race Training Plan" />
+
+      <div style=${{ borderTop:"0.5px solid var(--color-border-tertiary)", paddingTop:14, marginBottom:10 }}>
+        <p style=${{ fontSize:13, fontWeight:600, color:"var(--color-text-secondary)", margin:"0 0 12px" }}>Export options</p>
+
+        <label className="lbl">Workout start time (for calendar events)</label>
+        <input type="time" className="inp" value=${loc.startTime || "06:00"} onChange=${fS("startTime")} style=${{ marginBottom:12 }} />
+
+        <label className="lbl" style=${{ marginBottom:2 }}>Out-and-back split</label>
+        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>Splits easy/long distance in half and tempo main segment in half for out-and-back routes.</p>
+        <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+          <${TBtn} active=${isOn(loc.outBack)}  onClick=${tog("outBack",  true)}  style=${{ flex:1 }}>On</${TBtn}>
+          <${TBtn} active=${!isOn(loc.outBack)} onClick=${tog("outBack",  false)} style=${{ flex:1 }}>Off</${TBtn}>
+        </div>
+
+        <label className="lbl" style=${{ marginBottom:2 }}>Warmup / cooldown length</label>
+        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>Distance: exports as 1 mi at E-pace. Time: exports as fixed 10:00.</p>
+        <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+          <${TBtn} active=${isOn(loc.dynamicWU)}  onClick=${tog("dynamicWU", true)}  style=${{ flex:1 }}>Distance (1 mi)</${TBtn}>
+          <${TBtn} active=${!isOn(loc.dynamicWU)} onClick=${tog("dynamicWU", false)} style=${{ flex:1 }}>Time (10:00)</${TBtn}>
+        </div>
+
+        <label className="lbl" style=${{ marginBottom:2 }}>Pre-quality strides</label>
+        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>Adds 4×25s strides at stride pace after warmup, before tempo and interval efforts.</p>
+        <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+          <${TBtn} active=${isOn(loc.preStrides)}  onClick=${tog("preStrides", true)}  style=${{ flex:1 }}>On</${TBtn}>
+          <${TBtn} active=${!isOn(loc.preStrides)} onClick=${tog("preStrides", false)} style=${{ flex:1 }}>Off</${TBtn}>
+        </div>
+
+        <label className="lbl" style=${{ marginBottom:2 }}>Striders after easy runs (to improve running economy)</label>
+        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>4×30s accelerations at stride pace. Also consider running drills before runs: high knees, butt kicks, A-skips.</p>
+        <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+          <${TBtn} active=${isOn(loc.striders)}  onClick=${tog("striders", true)}  style=${{ flex:1 }}>On</${TBtn}>
+          <${TBtn} active=${!isOn(loc.striders)} onClick=${tog("striders", false)} style=${{ flex:1 }}>Off</${TBtn}>
+        </div>
+      </div>
+
+      <div style=${{ borderTop:"0.5px solid var(--color-border-tertiary)", paddingTop:14, marginBottom:10 }}>
+        <p style=${{ fontSize:13, fontWeight:600, color:"var(--color-text-secondary)", margin:"0 0 12px" }}>Workout options</p>
+        <label className="lbl">Interval reps</label>
+        <div style=${{ display:"flex", alignItems:"center", gap:12, marginBottom:4 }}>
+          <input type="range" min="2" max="8" step="1" value=${loc.reps} onChange=${fN("reps")} style=${{ flex:1 }} />
+          <span style=${{ fontSize:14, fontWeight:500, minWidth:28 }}>${loc.reps}×</span>
+        </div>
+      </div>
+
+      <button className="btn-primary" style=${{ width:"100%", marginBottom:10 }} onClick=${() => setCfg(Object.assign({}, loc))}>Apply changes</button>
+      <button className="btn" style=${{ width:"100%", marginBottom:4 }} onClick=${share}>Copy plan URL${shareMsg ? " — " + shareMsg : ""}</button>
+      <p style=${{ fontSize:11, color:"var(--color-text-secondary)", textAlign:"center", margin:"4px 0 0" }}>Bare URL = generic defaults · your config only in your link</p>
+    </div>
+  `;
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
+
+function App() {
+  const [cfg,      setCfg]      = useState(DEFAULTS);
+  const [plan,     setPlan]     = useState([]);
+  const [tab,      setTab]      = useState(0);
+  const [selWeek,  setSelWeek]  = useState(0);
+  const [sel,      setSel]      = useState({});
+  const [shareMsg, setShareMsg] = useState("");
+  const [copied,   setCopied]   = useState(false);
+  const today = new Date().toISOString().slice(0, 10);
+
+  useEffect(function() {
+    const merged = Object.assign({}, DEFAULTS);
+    try {
+      const h = window.location.hash;
+      if (h && h.length > 2) {
+        const q = h.charAt(1) === "?" ? h.slice(2) : h.slice(1);
+        const numK = { vdot:1, slrd:1, dpw:1, lrd:1, taper:1, reps:1 };
+        q.split("&").forEach(function(seg) {
+          const eq = seg.indexOf("="); if (eq < 1) return;
+          const k = seg.slice(0, eq), v = decodeURIComponent(seg.slice(eq + 1));
+          if (k in merged) merged[k] = numK[k] ? Number(v) : v;
+        });
+      }
+    } catch(e) {}
+    setCfg(merged);
+  }, []);
+
+  useEffect(function() {
+    if (!cfg.race || !cfg.start) return;
+    const p = buildPlan(cfg); setPlan(p);
+    let ci = -1;
+    for (let i = 0; i < p.length; i++) {
+      if (p[i].weekStart <= today && addDays(p[i].weekStart, 6) >= today) { ci = i; break; }
+    }
+    setSelWeek(ci >= 0 ? ci : 0);
+    setSel(allDates(p));
+  }, [cfg]);
+
+  const raceWeeks   = weeksUntil(cfg.race);
+  const selCount    = Object.keys(sel).length;
+  const planTitle   = cfg.name || "OnPace";
+  useEffect(function() { document.title = planTitle; }, [planTitle]);
+  const raceSec     = getRaceTimeSec(cfg.vdot, cfg.rdist);
+  const raceTimeStr = raceSec ? fmtRaceTime(raceSec) : null;
+  const racePaceMi  = getRacePaceMi(cfg.vdot, cfg.rdist, cfg.units);
+
+  let nextRunDay = null, curWeekIdx = 0;
+  for (let i = 0; i < plan.length; i++) {
+    if (plan[i].weekStart <= today && addDays(plan[i].weekStart, 6) >= today) curWeekIdx = i;
+    if (!nextRunDay) for (let j = 0; j < plan[i].days.length; j++) {
+      const d = plan[i].days[j]; if (d.type !== "rest" && d.date >= today) { nextRunDay = d; break; }
+    }
+  }
+
+  function share() {
+    try {
+      const url = window.location.origin + window.location.pathname + encodeParams(cfg);
+      navigator.clipboard.writeText(url).then(() => { setShareMsg("Copied!"); setTimeout(() => setShareMsg(""), 2500); });
+    } catch(e) { setShareMsg("Failed"); }
+  }
+
+  const TABS  = ["Dashboard","Plan","Export","Settings"];
+  const ICONS = ["◈","▤","↑","⚙"];
+
+  return html`
+    <div style=${{ maxWidth:480, margin:"0 auto", fontFamily:"var(--font-sans)", paddingBottom:72 }}>
+      <div style=${{ padding:"14px 16px 10px", borderBottom:"0.5px solid var(--color-border-tertiary)" }}>
+        <p style=${{ fontSize:18, fontWeight:700, margin:0, letterSpacing:"-0.01em" }}>${planTitle}</p>
+        <p style=${{ fontSize:12, color:"var(--color-text-secondary)", margin:"2px 0 0" }}>
+          ${cfg.rdist === "custom" ? cfg.customDist + " mi" : cfg.rdist.toUpperCase()} · ${cfg.race}${raceTimeStr && cfg.rdist !== "custom" ? " · Goal " + raceTimeStr : ""} · ${raceWeeks} wks out
+        </p>
+      </div>
+      ${tab === 0 && html`<${Dashboard}
+        today=${today} cfg=${cfg} nextRunDay=${nextRunDay}
+        curWeekIdx=${curWeekIdx} planLength=${plan.length}
+        raceTimeStr=${raceTimeStr} racePaceMi=${racePaceMi}
+      />`}
+      ${tab === 1 && html`<${Plan}
+        today=${today} cfg=${cfg} plan=${plan}
+        wk=${plan[selWeek]} selWeek=${selWeek} setSelWeek=${setSelWeek}
+      />`}
+      ${tab === 2 && html`<${Export}
+        today=${today} cfg=${cfg} plan=${plan}
+        sel=${sel} setSel=${setSel} selCount=${selCount}
+        raceTimeStr=${raceTimeStr} copied=${copied} setCopied=${setCopied}
+      />`}
+      ${tab === 3 && html`<${Settings}
+        cfg=${cfg} setCfg=${setCfg} shareMsg=${shareMsg} share=${share}
+      />`}
+      <div style=${{
+        position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)",
+        width:"100%", maxWidth:480, background:"var(--color-background-primary)",
+        borderTop:"0.5px solid var(--color-border-tertiary)", display:"flex", zIndex:99, backdropFilter:"blur(8px)",
+      }}>
+        ${TABS.map((t, i) => html`
+          <button key=${t} onClick=${() => setTab(i)} style=${{
+            flex:1, padding:"10px 4px 12px", border:"none", background:"none", cursor:"pointer",
+            fontSize:10, display:"flex", flexDirection:"column", alignItems:"center", gap:3,
+            color:      tab === i ? "var(--color-text-primary)" : "var(--color-text-tertiary)",
+            fontWeight: tab === i ? 500 : 400,
+          }}>
+            <span style=${{ fontSize:16 }}>${ICONS[i]}</span>
+            ${t}
+          </button>
+        `)}
+      </div>
+    </div>
+  `;
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(html`<${ErrorBoundary}><${App} /></${ErrorBoundary}>`);
+  </script>
+</body>
+</html>
