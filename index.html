@@ -57,7 +57,8 @@ const DEFAULTS = {
   slrd:5, dpw:4, lrd:6, taper:2, units:"mi", name:"", reps:4,
   striders:false, customDist:"", dynamicWU:false, preStrides:false,
   outBack:false, startTime:"06:00",
-  preStridesInterval:false, preStridesToempo:false, stridersMode:"time"
+  preStridesInterval:false, preStridesToempo:false,
+  stridersModeTempo:"time", stridersModeInterval:"time", stridersModeEasy:"time"
 };
 
 const VDOT_TABLE = {
@@ -167,7 +168,7 @@ function fmtDateLong(s){return new Date(s+"T12:00:00").toLocaleDateString("en-US
 function fmtDateFull(s){return new Date(s+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"});}
 function weeksUntil(s){const now=new Date();now.setHours(0,0,0,0);return Math.max(0,Math.ceil((new Date(s+"T12:00:00")-now)/604800000));}
 function encodeParams(cfg){
-  const keys=["vdot","race","rdist","start","slrd","dpw","lrd","taper","units","name","reps","striders","customDist","dynamicWU","preStrides","outBack","startTime","preStridesInterval","preStridesToempo","stridersMode"];
+  const keys=["vdot","race","rdist","start","slrd","dpw","lrd","taper","units","name","reps","striders","customDist","dynamicWU","preStrides","outBack","startTime","preStridesInterval","preStridesToempo","stridersModeTempo","stridersModeInterval","stridersModeEasy"];
   return "#?"+keys.map(function(k){return k+"="+encodeURIComponent(cfg[k]);}).join("&");
 }
 function snapRep(raw){let b=INTERVAL_MENU_MI[0],bd=Math.abs(raw-b);for(let i=1;i<INTERVAL_MENU_MI.length;i++){const d=Math.abs(raw-INTERVAL_MENU_MI[i]);if(d<bd){bd=d;b=INTERVAL_MENU_MI[i];}}return b;}
@@ -238,12 +239,11 @@ function makeSteps(d, cfg) {
   const hasStriders=isOn(cfg.striders);
   const hasPreStridesToempo=isOn(cfg.preStridesToempo)||isOn(cfg.preStrides);
   const hasPreStridesInterval=isOn(cfg.preStridesInterval)||isOn(cfg.preStrides);
-  const stridersMode=cfg.stridersMode||"time";
   const ob=isOn(cfg.outBack);
   const wu=getWUCD(cfg), wuLine=wuStep(wu,ep,u);
 
-  function strideBlock(onSec, offSec) {
-    if(stridersMode==="distance"){
+  function strideBlock(mode, onSec, offSec) {
+    if(mode==="distance"){
       return ["Repeat 6","Run 150 m @ "+strPr,"Walk 150 m","End Repeat"];
     }
     const onStr="0:"+(onSec<10?"0":"")+onSec;
@@ -256,14 +256,14 @@ function makeSteps(d, cfg) {
     const steps=ob
       ?["Run "+half.toFixed(2)+" "+u+" @ "+ep+" [out]","Run "+half.toFixed(2)+" "+u+" @ "+ep+" [back]"]
       :["Run "+d.dist.toFixed(2)+" "+u+" @ "+ep];
-    if(hasStriders){steps.push(...strideBlock(30,45));}
+    if(hasStriders){steps.push(...strideBlock(cfg.stridersModeEasy||"time",30,45));}
     return steps;
   }
   if(d.type==="tempo"){
     const mins=tempoMins(d.dist,d.pace);
     const halfMins=Math.round(mins/2);
     const steps=[wuLine];
-    if(hasPreStridesToempo){steps.push(...strideBlock(25,35));}
+    if(hasPreStridesToempo){steps.push(...strideBlock(cfg.stridersModeTempo||"time",25,35));}
     if(ob){steps.push("Run "+halfMins+":00 @ "+pr+" [out]","Run "+halfMins+":00 @ "+pr+" [back]");}
     else{steps.push("Run "+mins+":00 @ "+pr);}
     steps.push(wuLine);
@@ -274,7 +274,7 @@ function makeSteps(d, cfg) {
     const label=INTERVAL_LABELS[snapped]||snapped.toFixed(2)+" mi";
     const rst=secToPace(calcRest(snapped,d.pace));
     const steps=[wuLine];
-    if(hasPreStridesInterval){steps.push(...strideBlock(25,35));}
+    if(hasPreStridesInterval){steps.push(...strideBlock(cfg.stridersModeInterval||"time",25,35));}
     steps.push("Repeat "+reps,"Run "+label+" @ "+pr,"Run "+rst+" @ "+recRange,"End Repeat",wuLine);
     return steps;
   }
@@ -765,30 +765,35 @@ function Settings({ cfg, setCfg, shareMsg, share }) {
 
         <label className="lbl" style=${{ marginBottom:2 }}>Pre-tempo strides</label>
         <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>Adds 6 strides at stride pace after warmup, before tempo efforts.</p>
-        <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+        <div style=${{ display:"flex", gap:8, marginBottom:6 }}>
           <${TBtn} active=${isOn(loc.preStridesToempo)}  onClick=${tog("preStridesToempo", true)}  style=${{ flex:1 }}>On</${TBtn}>
           <${TBtn} active=${!isOn(loc.preStridesToempo)} onClick=${tog("preStridesToempo", false)} style=${{ flex:1 }}>Off</${TBtn}>
+        </div>
+        <div style=${{ display:"flex", gap:8, marginBottom:14 }}>
+          <${TBtn} active=${!loc.stridersModeTempo||loc.stridersModeTempo==="time"} onClick=${tog("stridersModeTempo","time")} style=${{ flex:1, fontSize:12 }}>Time (25s)</${TBtn}>
+          <${TBtn} active=${loc.stridersModeTempo==="distance"} onClick=${tog("stridersModeTempo","distance")} style=${{ flex:1, fontSize:12 }}>Distance (150 m)</${TBtn}>
         </div>
 
         <label className="lbl" style=${{ marginBottom:2 }}>Pre-interval strides</label>
         <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>Adds 6 strides at stride pace after warmup, before interval efforts.</p>
-        <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+        <div style=${{ display:"flex", gap:8, marginBottom:6 }}>
           <${TBtn} active=${isOn(loc.preStridesInterval)}  onClick=${tog("preStridesInterval", true)}  style=${{ flex:1 }}>On</${TBtn}>
           <${TBtn} active=${!isOn(loc.preStridesInterval)} onClick=${tog("preStridesInterval", false)} style=${{ flex:1 }}>Off</${TBtn}>
+        </div>
+        <div style=${{ display:"flex", gap:8, marginBottom:14 }}>
+          <${TBtn} active=${!loc.stridersModeInterval||loc.stridersModeInterval==="time"} onClick=${tog("stridersModeInterval","time")} style=${{ flex:1, fontSize:12 }}>Time (25s)</${TBtn}>
+          <${TBtn} active=${loc.stridersModeInterval==="distance"} onClick=${tog("stridersModeInterval","distance")} style=${{ flex:1, fontSize:12 }}>Distance (150 m)</${TBtn}>
         </div>
 
         <label className="lbl" style=${{ marginBottom:2 }}>Striders after easy runs</label>
         <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>6 strides at stride pace after easy and long runs. Also consider drills: high knees, butt kicks, A-skips.</p>
-        <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+        <div style=${{ display:"flex", gap:8, marginBottom:6 }}>
           <${TBtn} active=${isOn(loc.striders)}  onClick=${tog("striders", true)}  style=${{ flex:1 }}>On</${TBtn}>
           <${TBtn} active=${!isOn(loc.striders)} onClick=${tog("striders", false)} style=${{ flex:1 }}>Off</${TBtn}>
         </div>
-
-        <label className="lbl" style=${{ marginBottom:2 }}>Strides format</label>
-        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>Time: 25s/30s effort with a slightly longer walk rest. Distance: 150 m stride with 150 m walk rest.</p>
         <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
-          <${TBtn} active=${!loc.stridersMode||loc.stridersMode==="time"} onClick=${tog("stridersMode","time")} style=${{ flex:1 }}>Time</${TBtn}>
-          <${TBtn} active=${loc.stridersMode==="distance"} onClick=${tog("stridersMode","distance")} style=${{ flex:1 }}>Distance (150 m)</${TBtn}>
+          <${TBtn} active=${!loc.stridersModeEasy||loc.stridersModeEasy==="time"} onClick=${tog("stridersModeEasy","time")} style=${{ flex:1, fontSize:12 }}>Time (30s)</${TBtn}>
+          <${TBtn} active=${loc.stridersModeEasy==="distance"} onClick=${tog("stridersModeEasy","distance")} style=${{ flex:1, fontSize:12 }}>Distance (150 m)</${TBtn}>
         </div>
       </div>
 
