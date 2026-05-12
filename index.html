@@ -56,7 +56,8 @@ const DEFAULTS = {
   vdot:30, race:_race, rdist:"10k", start:_start,
   slrd:5, dpw:4, lrd:6, taper:2, units:"mi", name:"", reps:4,
   striders:false, customDist:"", dynamicWU:false, preStrides:false,
-  outBack:false, startTime:"06:00"
+  outBack:false, startTime:"06:00",
+  preStridesInterval:false, preStridesToempo:false, stridersMode:"time"
 };
 
 const VDOT_TABLE = {
@@ -166,7 +167,7 @@ function fmtDateLong(s){return new Date(s+"T12:00:00").toLocaleDateString("en-US
 function fmtDateFull(s){return new Date(s+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"});}
 function weeksUntil(s){const now=new Date();now.setHours(0,0,0,0);return Math.max(0,Math.ceil((new Date(s+"T12:00:00")-now)/604800000));}
 function encodeParams(cfg){
-  const keys=["vdot","race","rdist","start","slrd","dpw","lrd","taper","units","name","reps","striders","customDist","dynamicWU","preStrides","outBack","startTime"];
+  const keys=["vdot","race","rdist","start","slrd","dpw","lrd","taper","units","name","reps","striders","customDist","dynamicWU","preStrides","outBack","startTime","preStridesInterval","preStridesToempo","stridersMode"];
   return "#?"+keys.map(function(k){return k+"="+encodeURIComponent(cfg[k]);}).join("&");
 }
 function snapRep(raw){let b=INTERVAL_MENU_MI[0],bd=Math.abs(raw-b);for(let i=1;i<INTERVAL_MENU_MI.length;i++){const d=Math.abs(raw-INTERVAL_MENU_MI[i]);if(d<bd){bd=d;b=INTERVAL_MENU_MI[i];}}return b;}
@@ -182,19 +183,21 @@ function workoutTimeRange(d, cfg) {
   const WU=10, CD=10; // minutes
   if(d.type==="easy"||d.type==="long"){
     let lo=Math.round(d.dist*(pSec-h)/60), hi=Math.round(d.dist*(pSec+h)/60);
-    if(hasStriders){lo+=4*0.5+3*1;hi+=4*0.5+3*1;} // 4×30s strides + 3×1min recovery
+    if(hasStriders){lo+=7;hi+=7;} // 6 strides + walk rest
     return{lo,hi};
   }
   if(d.type==="tempo"){
-    const lo=WU+Math.round(d.dist*(pSec-h)/60)+CD;
-    const hi=WU+Math.round(d.dist*(pSec+h)/60)+CD;
+    const preTime=isOn(cfg.preStridesToempo)||isOn(cfg.preStrides)?6:0;
+    const lo=WU+preTime+Math.round(d.dist*(pSec-h)/60)+CD;
+    const hi=WU+preTime+Math.round(d.dist*(pSec+h)/60)+CD;
     return{lo,hi};
   }
   if(d.type==="interval"){
+    const preTime=isOn(cfg.preStridesInterval)||isOn(cfg.preStrides)?6:0;
     const reps=Number(cfg.reps)||4, snapped=snapRep(d.dist/reps);
     const rm=calcRest(snapped,d.pace)/60;
-    const lo=Math.round(WU+(snapped*(pSec-h)/60+rm)*reps+CD);
-    const hi=Math.round(WU+(snapped*(pSec+h)/60+rm)*reps+CD);
+    const lo=Math.round(WU+preTime+(snapped*(pSec-h)/60+rm)*reps+CD);
+    const hi=Math.round(WU+preTime+(snapped*(pSec+h)/60+rm)*reps+CD);
     return{lo,hi};
   }
   return{lo:30,hi:45};
@@ -232,23 +235,35 @@ function makeSteps(d, cfg) {
   const pr=spreadRange(d.pace,SPREAD[d.type]||25);
   const strPr=spreadRange(getPace(cfg.vdot,"stride"),SPREAD.stride);
   const recRange=getRecoveryRange(cfg.vdot);
-  const hasStriders=isOn(cfg.striders), hasPreStrides=isOn(cfg.preStrides);
+  const hasStriders=isOn(cfg.striders);
+  const hasPreStridesToempo=isOn(cfg.preStridesToempo)||isOn(cfg.preStrides);
+  const hasPreStridesInterval=isOn(cfg.preStridesInterval)||isOn(cfg.preStrides);
+  const stridersMode=cfg.stridersMode||"time";
   const ob=isOn(cfg.outBack);
   const wu=getWUCD(cfg), wuLine=wuStep(wu,ep,u);
+
+  function strideBlock(onSec, offSec) {
+    if(stridersMode==="distance"){
+      return ["Repeat 6","Run 150 m @ "+strPr,"Walk 150 m","End Repeat"];
+    }
+    const onStr="0:"+(onSec<10?"0":"")+onSec;
+    const offStr="0:"+(offSec<10?"0":"")+offSec;
+    return ["Repeat 6","Run "+onStr+" @ "+strPr,"Walk "+offStr,"End Repeat"];
+  }
 
   if(d.type==="easy"||d.type==="long"){
     const half=Math.round(d.dist/2*10)/10;
     const steps=ob
       ?["Run "+half.toFixed(2)+" "+u+" @ "+ep+" [out]","Run "+half.toFixed(2)+" "+u+" @ "+ep+" [back]"]
       :["Run "+d.dist.toFixed(2)+" "+u+" @ "+ep];
-    if(hasStriders){for(let i=0;i<4;i++){steps.push("Run 0:30 @ "+strPr);if(i<3)steps.push("Run 1:00 @ "+recRange);}}
+    if(hasStriders){steps.push(...strideBlock(30,45));}
     return steps;
   }
   if(d.type==="tempo"){
     const mins=tempoMins(d.dist,d.pace);
     const halfMins=Math.round(mins/2);
     const steps=[wuLine];
-    if(hasPreStrides){for(let i=0;i<4;i++){steps.push("Run 0:25 @ "+strPr);if(i<3)steps.push("Run 1:00 @ "+recRange);}}
+    if(hasPreStridesToempo){steps.push(...strideBlock(25,35));}
     if(ob){steps.push("Run "+halfMins+":00 @ "+pr+" [out]","Run "+halfMins+":00 @ "+pr+" [back]");}
     else{steps.push("Run "+mins+":00 @ "+pr);}
     steps.push(wuLine);
@@ -259,7 +274,7 @@ function makeSteps(d, cfg) {
     const label=INTERVAL_LABELS[snapped]||snapped.toFixed(2)+" mi";
     const rst=secToPace(calcRest(snapped,d.pace));
     const steps=[wuLine];
-    if(hasPreStrides){for(let i=0;i<4;i++){steps.push("Run 0:25 @ "+strPr);if(i<3)steps.push("Run 1:00 @ "+recRange);}}
+    if(hasPreStridesInterval){steps.push(...strideBlock(25,35));}
     steps.push("Repeat "+reps,"Run "+label+" @ "+pr,"Run "+rst+" @ "+recRange,"End Repeat",wuLine);
     return steps;
   }
@@ -282,7 +297,7 @@ function makeIMW(plan, cfg, sel) {
 
 function pad2(n){return n<10?"0"+n:String(n);}
 
-function makeICS(plan, cfg, sel) {
+function makeICS(plan, cfg, sel, selRace) {
   const lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//OnPace//EN","CALSCALE:GREGORIAN"];
   const racePace=getRacePaceMi(cfg.vdot,cfg.rdist,cfg.units);
   const timeParts=(cfg.startTime||"06:00").split(":");
@@ -310,7 +325,7 @@ function makeICS(plan, cfg, sel) {
 
   // Race event
   const raceSec=getRaceTimeSec(cfg.vdot,cfg.rdist);
-  if(raceSec&&cfg.rdist!=="custom"){
+  if(selRace&&raceSec&&cfg.rdist!=="custom"){
     const rdist=cfg.rdist==="half"?"Half Marathon":cfg.rdist==="marathon"?"Marathon":cfg.rdist.toUpperCase();
     const raceDesc="Goal: "+fmtRaceTime(raceSec)+(racePace?" @ "+racePace+"/"+cfg.units:"")+"\\nVDOT "+cfg.vdot+" · OnPace";
     lines.push("BEGIN:VEVENT","UID:race-"+cfg.race+"@onpace",
@@ -415,6 +430,12 @@ function nxtRun(plan, today) {
     }
   return {};
 }
+function nxtWeek(plan, today) {
+  const ci = plan.findIndex(w => w.weekStart <= today && addDays(w.weekStart, 6) >= today);
+  const target = ci >= 0 ? plan[ci + 1] : plan.find(w => w.weekStart > today);
+  if (!target) return {};
+  const r = {}; target.days.forEach(d => { if (d.type !== "rest") r[d.date] = true; }); return r;
+}
 
 // ── Error boundary ────────────────────────────────────────────────────────────
 
@@ -448,7 +469,7 @@ function TBtn({ active, onClick, children, style }) {
 
 function Dashboard({ today, cfg, nextRunDay, curWeekIdx, planLength, raceTimeStr, racePaceMi }) {
   const paces = [
-    { label:"Stride",      pace:getPace(cfg.vdot,"stride"),   spread:SPREAD.stride,   type:"stride",   dim:!isOn(cfg.striders) },
+    { label:"Stride",      pace:getPace(cfg.vdot,"stride"),   spread:SPREAD.stride,   type:"stride",   dim:!isOn(cfg.striders)&&!isOn(cfg.preStridesInterval)&&!isOn(cfg.preStridesToempo) },
     { label:"Interval",    pace:getPace(cfg.vdot,"interval"), spread:SPREAD.interval, type:"interval" },
     { label:"Tempo",       pace:getPace(cfg.vdot,"tempo"),    spread:SPREAD.tempo,    type:"tempo" },
     { label:"Easy / Long", pace:getPace(cfg.vdot,"easy"),     spread:SPREAD.easy,     type:"easy" },
@@ -557,16 +578,25 @@ function Plan({ today, cfg, plan, wk, selWeek, setSelWeek }) {
   `;
 }
 
-function Export({ today, cfg, plan, sel, setSel, selCount, raceTimeStr, copied, setCopied }) {
+function Export({ today, cfg, plan, sel, setSel, selCount, raceTimeStr, selRace, setSelRace, copied, setCopied }) {
   const imwText = makeIMW(plan, cfg, sel);
+  const [collapsed, setCollapsed] = useState({});
+
+  useEffect(() => {
+    const c = {};
+    plan.forEach((w, wi) => { if (addDays(w.weekStart, 6) < today) c[wi] = true; });
+    setCollapsed(c);
+  }, [plan]);
+
   function copyIMW() {
     try { navigator.clipboard.writeText(imwText).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2500); }); } catch(e) {}
   }
-  function doICS() { dlFile(makeICS(plan, cfg, sel), (cfg.name ? cfg.name + "_" : "") + "OnPace.ics", "text/calendar"); }
+  function doICS() { dlFile(makeICS(plan, cfg, sel, selRace), (cfg.name ? cfg.name + "_" : "") + "OnPace.ics", "text/calendar"); }
   const presets = [
     ["Everything", () => allDates(plan)],
     ["Remaining",  () => remDates(plan, today)],
     ["This week",  () => wkDates(plan, today)],
+    ["Next week",  () => nxtWeek(plan, today)],
     ["Next run",   () => nxtRun(plan, today)],
     ["None",       () => ({})],
   ];
@@ -576,9 +606,12 @@ function Export({ today, cfg, plan, sel, setSel, selCount, raceTimeStr, copied, 
       <div className="card">
         <p style=${{ fontSize:11, fontWeight:600, textAlign:"center", letterSpacing:"0.06em", textTransform:"uppercase", color:"var(--color-text-secondary)", margin:"0 0 8px" }}>Calendar (.ics)</p>
         ${raceTimeStr && cfg.rdist !== "custom" && html`
-          <p style=${{ fontSize:12, color:"var(--color-text-secondary)", margin:"0 0 8px" }}>Includes race event: ${cfg.rdist.toUpperCase()} goal ${raceTimeStr}</p>
+          <label style=${{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", marginBottom:10 }}>
+            <input type="checkbox" checked=${selRace} onChange=${() => setSelRace(r => !r)} style=${{ width:15, height:15, flexShrink:0 }} />
+            <span style=${{ fontSize:12, color:"var(--color-text-secondary)" }}>Include race event: ${cfg.rdist.toUpperCase()} goal ${raceTimeStr}</span>
+          </label>
         `}
-        <button className="btn-primary" style=${{ width:"100%" }} onClick=${doICS} disabled=${selCount === 0}>Download .ics</button>
+        <button className="btn-primary" style=${{ width:"100%" }} onClick=${doICS} disabled=${selCount === 0 && !selRace}>Download .ics</button>
       </div>
       <div className="card">
         <p style=${{ fontSize:11, fontWeight:600, textAlign:"center", letterSpacing:"0.06em", textTransform:"uppercase", color:"var(--color-text-secondary)", margin:"0 0 8px" }}>
@@ -605,9 +638,10 @@ function Export({ today, cfg, plan, sel, setSel, selCount, raceTimeStr, copied, 
         const workouts = w.days.filter(d => d.type !== "rest");
         const allSel   = workouts.every(d =>  sel[d.date]);
         const anySel   = workouts.some(d  =>  sel[d.date]);
+        const isCol    = !!collapsed[wi];
         return html`
           <div key=${wi} className="card" style=${{ padding:"10px 14px", marginBottom:8 }}>
-            <label style=${{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", marginBottom:workouts.length ? 8 : 0 }}>
+            <div style=${{ display:"flex", alignItems:"center", gap:8, marginBottom: isCol ? 0 : (workouts.length ? 8 : 0) }}>
               <input type="checkbox" checked=${allSel}
                 ref=${el => { if (el) el.indeterminate = anySel && !allSel; }}
                 onChange=${() => {
@@ -615,11 +649,15 @@ function Export({ today, cfg, plan, sel, setSel, selCount, raceTimeStr, copied, 
                   workouts.forEach(d => { allSel ? delete next[d.date] : next[d.date] = true; });
                   setSel(next);
                 }}
-                style=${{ width:16, height:16 }} />
-              <span style=${{ fontSize:13, fontWeight:500 }}>Week ${w.week}${w.isTaper ? " · Taper" : ""}</span>
-              <span style=${{ fontSize:11, color:"var(--color-text-secondary)" }}>${fmtDate(w.weekStart)}</span>
-            </label>
-            ${workouts.map((d, di) => html`
+                style=${{ width:16, height:16, flexShrink:0, cursor:"pointer" }} />
+              <div style=${{ flex:1, display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}
+                onClick=${() => setCollapsed(c => ({...c, [wi]: !c[wi]}))}>
+                <span style=${{ fontSize:13, fontWeight:500 }}>Week ${w.week}${w.isTaper ? " · Taper" : ""}</span>
+                <span style=${{ fontSize:11, color:"var(--color-text-secondary)" }}>${fmtDate(w.weekStart)}–${fmtDate(addDays(w.weekStart,6))}</span>
+                <span style=${{ marginLeft:"auto", fontSize:14, color:"var(--color-text-tertiary)", userSelect:"none" }}>${isCol ? "›" : "∨"}</span>
+              </div>
+            </div>
+            ${!isCol && workouts.map((d, di) => html`
               <label key=${di} style=${{ display:"flex", alignItems:"center", gap:10, padding:"5px 0", borderTop:"0.5px solid var(--color-border-tertiary)", cursor:"pointer" }}>
                 <input type="checkbox" checked=${!!sel[d.date]}
                   onChange=${() => { const next = Object.assign({}, sel); sel[d.date] ? delete next[d.date] : next[d.date] = true; setSel(next); }}
@@ -725,18 +763,32 @@ function Settings({ cfg, setCfg, shareMsg, share }) {
           <${TBtn} active=${!isOn(loc.dynamicWU)} onClick=${tog("dynamicWU", false)} style=${{ flex:1 }}>Time (10:00)</${TBtn}>
         </div>
 
-        <label className="lbl" style=${{ marginBottom:2 }}>Pre-quality strides</label>
-        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>Adds 4×25s strides at stride pace after warmup, before tempo and interval efforts.</p>
+        <label className="lbl" style=${{ marginBottom:2 }}>Pre-tempo strides</label>
+        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>Adds 6 strides at stride pace after warmup, before tempo efforts.</p>
         <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
-          <${TBtn} active=${isOn(loc.preStrides)}  onClick=${tog("preStrides", true)}  style=${{ flex:1 }}>On</${TBtn}>
-          <${TBtn} active=${!isOn(loc.preStrides)} onClick=${tog("preStrides", false)} style=${{ flex:1 }}>Off</${TBtn}>
+          <${TBtn} active=${isOn(loc.preStridesToempo)}  onClick=${tog("preStridesToempo", true)}  style=${{ flex:1 }}>On</${TBtn}>
+          <${TBtn} active=${!isOn(loc.preStridesToempo)} onClick=${tog("preStridesToempo", false)} style=${{ flex:1 }}>Off</${TBtn}>
         </div>
 
-        <label className="lbl" style=${{ marginBottom:2 }}>Striders after easy runs (to improve running economy)</label>
-        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>4×30s accelerations at stride pace. Also consider running drills before runs: high knees, butt kicks, A-skips.</p>
+        <label className="lbl" style=${{ marginBottom:2 }}>Pre-interval strides</label>
+        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>Adds 6 strides at stride pace after warmup, before interval efforts.</p>
+        <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+          <${TBtn} active=${isOn(loc.preStridesInterval)}  onClick=${tog("preStridesInterval", true)}  style=${{ flex:1 }}>On</${TBtn}>
+          <${TBtn} active=${!isOn(loc.preStridesInterval)} onClick=${tog("preStridesInterval", false)} style=${{ flex:1 }}>Off</${TBtn}>
+        </div>
+
+        <label className="lbl" style=${{ marginBottom:2 }}>Striders after easy runs</label>
+        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>6 strides at stride pace after easy and long runs. Also consider drills: high knees, butt kicks, A-skips.</p>
         <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
           <${TBtn} active=${isOn(loc.striders)}  onClick=${tog("striders", true)}  style=${{ flex:1 }}>On</${TBtn}>
           <${TBtn} active=${!isOn(loc.striders)} onClick=${tog("striders", false)} style=${{ flex:1 }}>Off</${TBtn}>
+        </div>
+
+        <label className="lbl" style=${{ marginBottom:2 }}>Strides format</label>
+        <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px", lineHeight:1.5 }}>Time: 25s/30s effort with a slightly longer walk rest. Distance: 150 m stride with 150 m walk rest.</p>
+        <div style=${{ display:"flex", gap:8, marginBottom:12 }}>
+          <${TBtn} active=${!loc.stridersMode||loc.stridersMode==="time"} onClick=${tog("stridersMode","time")} style=${{ flex:1 }}>Time</${TBtn}>
+          <${TBtn} active=${loc.stridersMode==="distance"} onClick=${tog("stridersMode","distance")} style=${{ flex:1 }}>Distance (150 m)</${TBtn}>
         </div>
       </div>
 
@@ -764,6 +816,7 @@ function App() {
   const [tab,      setTab]      = useState(0);
   const [selWeek,  setSelWeek]  = useState(0);
   const [sel,      setSel]      = useState({});
+  const [selRace,  setSelRace]  = useState(true);
   const [shareMsg, setShareMsg] = useState("");
   const [copied,   setCopied]   = useState(false);
   const today = new Date().toISOString().slice(0, 10);
@@ -842,7 +895,8 @@ function App() {
       ${tab === 2 && html`<${Export}
         today=${today} cfg=${cfg} plan=${plan}
         sel=${sel} setSel=${setSel} selCount=${selCount}
-        raceTimeStr=${raceTimeStr} copied=${copied} setCopied=${setCopied}
+        raceTimeStr=${raceTimeStr} selRace=${selRace} setSelRace=${setSelRace}
+        copied=${copied} setCopied=${setCopied}
       />`}
       ${tab === 3 && html`<${Settings}
         cfg=${cfg} setCfg=${setCfg} shareMsg=${shareMsg} share=${share}
