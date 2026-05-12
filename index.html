@@ -42,6 +42,8 @@
     .pill-interval { background:#FAECE7; color:#993C1D; }
     .pill-long     { background:#E6F1FB; color:#185FA5; }
     .pill-rest     { background:#F5F5F5; color:#888780; }
+    .pill-race     { background:#FFF3E0; color:#C84B00; }
+    .pill-prerace  { background:#F3E5F5; color:#7B1FA2; }
   </style>
 </head>
 <body>
@@ -113,6 +115,8 @@ const COLORS     = {
   interval: {bg:"#FAECE7",fg:"#993C1D",label:"Interval"},
   long:     {bg:"#E6F1FB",fg:"#185FA5",label:"Long"},
   rest:     {bg:"#F5F5F5",fg:"#888780",label:"Rest"},
+  race:     {bg:"#FFF3E0",fg:"#C84B00",label:"Race"},
+  prerace:  {bg:"#F3E5F5",fg:"#7B1FA2",label:"Pre-race"},
 };
 const INTERVAL_MENU_MI = [0.25,0.375,0.5,0.625,0.75,1.0];
 const INTERVAL_LABELS  = {0.25:"400 m",0.375:"600 m",0.5:"800 m",0.625:"1000 m",0.75:"1200 m",1.0:"1 mi"};
@@ -201,12 +205,14 @@ function workoutTimeRange(d, cfg) {
     const hi=Math.round(WU+preTime+(snapped*(pSec+h)/60+rm)*reps+CD);
     return{lo,hi};
   }
+  if(d.type==="prerace") return{lo:20,hi:30};
   return{lo:30,hi:45};
 }
 
 function makeSuffix(d, cfg) {
   const {lo,hi}=workoutTimeRange(d,cfg);
   const u=cfg.units;
+  if(d.type==="prerace") return d.dist+" "+u+" easy + 4×20s strides [pre-race]";
   if(d.type==="easy"||d.type==="long") return d.dist+" "+u+" ["+lo+"-"+hi+" min]";
   if(d.type==="tempo"){const mins=tempoMins(d.dist,d.pace);return mins+" min tempo ["+lo+"-"+hi+" min total]";}
   if(d.type==="interval"){
@@ -219,6 +225,7 @@ function makeSuffix(d, cfg) {
 
 function icsEventName(d, cfg) {
   const u=cfg.units;
+  if(d.type==="prerace")  return "Run: Pre-race ("+d.dist+" "+u+" easy + strides)";
   if(d.type==="easy")     return "Run: Easy ("+d.dist+" "+u+")";
   if(d.type==="long")     return "Run: Long ("+d.dist+" "+u+")";
   if(d.type==="tempo")    return "Run: Tempo ("+d.dist+" "+u+")";
@@ -251,6 +258,12 @@ function makeSteps(d, cfg) {
     return ["Repeat 6","Run "+onStr+" @ "+strPr,"Walk "+offStr,"End Repeat"];
   }
 
+  if(d.type==="prerace"){
+    // Jack Daniels: day before race — short easy jog + 4 accelerations to prime legs
+    const steps=["Run "+d.dist.toFixed(2)+" "+u+" @ "+ep];
+    steps.push("Repeat 4","Run 0:20 @ "+strPr,"Walk 0:30","End Repeat");
+    return steps;
+  }
   if(d.type==="easy"||d.type==="long"){
     const half=Math.round(d.dist/2*10)/10;
     const steps=ob
@@ -285,7 +298,7 @@ function makeIMW(plan, cfg, sel) {
   const out=[];
   plan.forEach(function(w){
     w.days.forEach(function(d){
-      if(d.type==="rest"||!sel[d.date])return;
+      if(d.type==="rest"||d.type==="race"||!sel[d.date])return;
       out.push("# Date: "+d.date);
       out.push("# Name: "+icsEventName(d,cfg));
       makeSteps(d,cfg).forEach(function(s){out.push(s);});
@@ -305,7 +318,7 @@ function makeICS(plan, cfg, sel, selRace) {
 
   plan.forEach(function(w){
     w.days.forEach(function(d){
-      if(d.type==="rest"||!sel[d.date])return;
+      if(d.type==="rest"||d.type==="race"||!sel[d.date])return;
       const uid=d.date+"-"+d.type+"-"+Math.random().toString(36).slice(2)+"@onpace";
       const {hi}=workoutTimeRange(d,cfg);
       const dtDate=d.date.replace(/-/g,"");
@@ -371,9 +384,18 @@ function assignWorkoutType(d, lrd, dpw, runNoLong, isTaper) {
 function buildWeekDays(ws, rdSet, runNoLong, cfg, longDist, isTaper) {
   const lrd = Number(cfg.lrd), dpw = Number(cfg.dpw);
   const wsDow = new Date(ws + "T12:00:00").getDay();
+  const preRaceDate = addDays(cfg.race, -1);
   let weekMile = 0;
   const days = Array.from({ length: 7 }, (_, d) => {
     const date = addDays(ws, d - wsDow);
+    // Race day: no training run
+    if(date === cfg.race) return { type:"race", dow:d, date };
+    // Day before race: short easy jog + strides (Jack Daniels pre-race primer)
+    if(date === preRaceDate && rdSet[d]) {
+      const dist = cfg.units === "km" ? 3.0 : 2.0;
+      weekMile += dist;
+      return { type:"prerace", dow:d, date, dist, pace:getPace(cfg.vdot,"easy") };
+    }
     if (!rdSet[d]) return { type:"rest", dow:d, date };
     const type = assignWorkoutType(d, lrd, dpw, runNoLong, isTaper);
     const pace  = getPace(cfg.vdot, type === "long" ? "easy" : type);
@@ -413,20 +435,21 @@ const {useState, useEffect} = React;
 
 // ── Module-level date-set utilities ──────────────────────────────────────────
 
+function isRunDay(d) { return d.type !== "rest" && d.type !== "race"; }
 function allDates(plan) {
-  const r = {}; plan.forEach(w => w.days.forEach(d => { if (d.type !== "rest") r[d.date] = true; })); return r;
+  const r = {}; plan.forEach(w => w.days.forEach(d => { if (isRunDay(d)) r[d.date] = true; })); return r;
 }
 function remDates(plan, today) {
-  const r = {}; plan.forEach(w => w.days.forEach(d => { if (d.type !== "rest" && d.date >= today) r[d.date] = true; })); return r;
+  const r = {}; plan.forEach(w => w.days.forEach(d => { if (isRunDay(d) && d.date >= today) r[d.date] = true; })); return r;
 }
 function wkDates(plan, today) {
   const r = {}, cw = plan.find(w => w.weekStart <= today && addDays(w.weekStart, 6) >= today);
-  if (cw) cw.days.forEach(d => { if (d.type !== "rest") r[d.date] = true; }); return r;
+  if (cw) cw.days.forEach(d => { if (isRunDay(d)) r[d.date] = true; }); return r;
 }
 function nxtRun(plan, today) {
   for (let i = 0; i < plan.length; i++)
     for (let j = 0; j < plan[i].days.length; j++) {
-      const d = plan[i].days[j]; if (d.type !== "rest" && d.date >= today) return { [d.date]: true };
+      const d = plan[i].days[j]; if (isRunDay(d) && d.date >= today) return { [d.date]: true };
     }
   return {};
 }
@@ -434,7 +457,7 @@ function nxtWeek(plan, today) {
   const ci = plan.findIndex(w => w.weekStart <= today && addDays(w.weekStart, 6) >= today);
   const target = ci >= 0 ? plan[ci + 1] : plan.find(w => w.weekStart > today);
   if (!target) return {};
-  const r = {}; target.days.forEach(d => { if (d.type !== "rest") r[d.date] = true; }); return r;
+  const r = {}; target.days.forEach(d => { if (isRunDay(d)) r[d.date] = true; }); return r;
 }
 
 // ── Error boundary ────────────────────────────────────────────────────────────
@@ -526,7 +549,7 @@ function Dashboard({ today, cfg, nextRunDay, curWeekIdx, planLength, raceTimeStr
   `;
 }
 
-function Plan({ today, cfg, plan, wk, selWeek, setSelWeek }) {
+function Plan({ today, cfg, plan, wk, selWeek, setSelWeek, raceTimeStr }) {
   if (!wk) return null;
   return html`
     <div style=${{ padding:16 }}>
@@ -555,7 +578,15 @@ function Plan({ today, cfg, plan, wk, selWeek, setSelWeek }) {
               </span>
               <${Pill} type=${d.type} />
             </div>
-            ${d.type !== "rest" && html`
+            ${d.type === "race" && html`
+              <div style=${{ marginTop:5, fontSize:13, fontWeight:600, color:isToday?"var(--color-text-info)":"#C84B00" }}>
+                🏁 ${cfg.rdist !== "custom" ? (cfg.rdist === "half" ? "Half Marathon" : cfg.rdist === "marathon" ? "Marathon" : cfg.rdist.toUpperCase()) : "Race"}${raceTimeStr ? " — Goal " + raceTimeStr : ""}
+              </div>
+            `}
+            ${d.type === "prerace" && html`
+              <div style=${{ marginTop:5, fontSize:13, color:isToday?"var(--color-text-info)":"var(--color-text-secondary)" }}>${d.dist} ${cfg.units} easy + 4×20s strides</div>
+            `}
+            ${d.type !== "rest" && d.type !== "race" && d.type !== "prerace" && html`
               <div style=${{ marginTop:5, fontSize:13, color:isToday?"var(--color-text-info)":"var(--color-text-secondary)" }}>${d.dist} ${cfg.units} · ${d.pace}/${cfg.units}</div>
             `}
           </div>
@@ -635,7 +666,7 @@ function Export({ today, cfg, plan, sel, setSel, selCount, raceTimeStr, selRace,
       </div>
       <p style=${{ fontSize:11, color:"var(--color-text-secondary)", margin:"0 0 8px" }}>${selCount} workout${selCount !== 1 ? "s" : ""} selected</p>
       ${plan.map((w, wi) => {
-        const workouts = w.days.filter(d => d.type !== "rest");
+        const workouts = w.days.filter(d => isRunDay(d));
         const allSel   = workouts.every(d =>  sel[d.date]);
         const anySel   = workouts.some(d  =>  sel[d.date]);
         const isCol    = !!collapsed[wi];
@@ -866,7 +897,7 @@ function App() {
   for (let i = 0; i < plan.length; i++) {
     if (plan[i].weekStart <= today && addDays(plan[i].weekStart, 6) >= today) curWeekIdx = i;
     if (!nextRunDay) for (let j = 0; j < plan[i].days.length; j++) {
-      const d = plan[i].days[j]; if (d.type !== "rest" && d.date >= today) { nextRunDay = d; break; }
+      const d = plan[i].days[j]; if (isRunDay(d) && d.date >= today) { nextRunDay = d; break; }
     }
   }
 
@@ -896,6 +927,7 @@ function App() {
       ${tab === 1 && html`<${Plan}
         today=${today} cfg=${cfg} plan=${plan}
         wk=${plan[selWeek]} selWeek=${selWeek} setSelWeek=${setSelWeek}
+        raceTimeStr=${raceTimeStr}
       />`}
       ${tab === 2 && html`<${Export}
         today=${today} cfg=${cfg} plan=${plan}
