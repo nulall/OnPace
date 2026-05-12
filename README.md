@@ -38,10 +38,9 @@ Your settings are not stored server-side. Instead, tap **Copy plan URL** in Sett
 | **Workout start time** | 6:00 AM | Time of day used for calendar events. |
 | **Out-and-back split** | Off | Splits easy/long distance in half and tempo main segment in half — useful when you need to turn around at the midpoint. |
 | **Warmup / cooldown** | Time (10:00) | *Distance*: exports as 1 mi at easy pace. *Time*: exports as a fixed 10-minute block. |
-| **Pre-tempo strides** | Off | Adds 6 strides at stride pace after warmup, before tempo efforts. |
-| **Pre-interval strides** | Off | Adds 6 strides at stride pace after warmup, before interval efforts. |
-| **Striders after easy runs** | Off | Adds 6 strides at stride pace to the end of easy and long runs to build running economy. |
-| **Strides format** | Time | Time: 25s/30s effort with a slightly longer walk rest. Distance: 150 m stride with 150 m walk rest. |
+| **Pre-tempo strides** | Off / Time | Adds 6 strides before tempo efforts. Format: Time (25s effort + 35s walk) or Distance (150 m + 150 m walk). |
+| **Pre-interval strides** | Off / Time | Adds 6 strides before interval efforts. Format: Time (25s effort + 35s walk) or Distance (150 m + 150 m walk). |
+| **Striders after easy runs** | Off / Time | Adds 6 strides after easy and long runs. Format: Time (30s effort + 45s walk) or Distance (150 m + 150 m walk). |
 
 ### Workout options
 
