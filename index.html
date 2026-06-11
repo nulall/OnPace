@@ -123,10 +123,14 @@ const INTERVAL_LABELS  = {0.25:"400 m",0.375:"600 m",0.5:"800 m",0.625:"1000 m",
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function paceToSec(p){const s=p.split(":");return parseInt(s[0],10)*60+parseInt(s[1]||"0",10);}
+function paceToSec(p){if(typeof p!=="string")return 0;const s=p.split(":");const v=parseInt(s[0],10)*60+parseInt(s[1]||"0",10);return isFinite(v)?v:0;}
 function secToPace(s){return Math.floor(s/60)+":"+(s%60<10?"0"+(s%60):s%60);}
 function spreadRange(pace,total){const m=paceToSec(pace),h=Math.round(total/2);return secToPace(m-h)+"–"+secToPace(m+h);}
 function spreadDisplay(pace,total){return pace+" ("+spreadRange(pace,total)+")";}
+
+const VDOT_KEYS       = Object.keys(VDOT_TABLE).map(Number).sort((a,b) => a-b);
+const STRIDE_KEYS     = Object.keys(VDOT_STRIDE).map(Number).sort((a,b) => a-b);
+const RACE_TIME_KEYS  = Object.keys(VDOT_RACE_TIMES).map(Number).sort((a,b) => a-b);
 
 function lerpKeys(keys, vdot) {
   let lo = keys[0], hi = keys[keys.length - 1];
@@ -138,20 +142,17 @@ function lerpKeys(keys, vdot) {
 }
 function getPace(vdot, type) {
   if (type === "stride") {
-    const sk = Object.keys(VDOT_STRIDE).map(Number).sort((a,b) => a-b);
-    const {lo, hi, t} = lerpKeys(sk, vdot);
+    const {lo, hi, t} = lerpKeys(STRIDE_KEYS, vdot);
     if (lo === hi) return VDOT_STRIDE[lo] || "6:23";
     return secToPace(Math.round(paceToSec(VDOT_STRIDE[lo]) + t * (paceToSec(VDOT_STRIDE[hi]) - paceToSec(VDOT_STRIDE[lo]))));
   }
-  const keys = Object.keys(VDOT_TABLE).map(Number).sort((a,b) => a-b);
-  const {lo, hi, t} = lerpKeys(keys, vdot);
+  const {lo, hi, t} = lerpKeys(VDOT_KEYS, vdot);
   const col = type === "long" ? "easy" : type;
   if (lo === hi) return VDOT_TABLE[lo][col] || "10:00";
   return secToPace(Math.round(paceToSec(VDOT_TABLE[lo][col]) + t * (paceToSec(VDOT_TABLE[hi][col]) - paceToSec(VDOT_TABLE[lo][col]))));
 }
 function getRaceTimeSec(vdot, rdist) {
-  const keys = Object.keys(VDOT_RACE_TIMES).map(Number).sort((a,b) => a-b);
-  const {lo, hi, t} = lerpKeys(keys, vdot);
+  const {lo, hi, t} = lerpKeys(RACE_TIME_KEYS, vdot);
   const loVal = (VDOT_RACE_TIMES[lo] || {})[rdist]; if (!loVal) return null;
   if (lo === hi) return loVal;
   const hiVal = VDOT_RACE_TIMES[hi][rdist]; if (!hiVal) return loVal;
@@ -267,7 +268,7 @@ function makeSteps(d, cfg) {
   if(d.type==="easy"||d.type==="long"){
     const half=Math.round(d.dist/2*10)/10;
     const steps=ob
-      ?["Run "+half.toFixed(2)+" "+u+" @ "+ep+" [out]","Run "+half.toFixed(2)+" "+u+" @ "+ep+" [back]"]
+      ?["Run "+half.toFixed(2)+" "+u+" @ "+ep,"Run "+half.toFixed(2)+" "+u+" @ "+ep]
       :["Run "+d.dist.toFixed(2)+" "+u+" @ "+ep];
     if(hasStriders){steps.push(...strideBlock(cfg.stridersModeEasy||"time",30,45));}
     return steps;
@@ -277,7 +278,7 @@ function makeSteps(d, cfg) {
     const halfMins=Math.round(mins/2);
     const steps=[wuLine];
     if(hasPreStridesToempo){steps.push(...strideBlock(cfg.stridersModeTempo||"time",25,35));}
-    if(ob){steps.push("Run "+halfMins+":00 @ "+pr+" [out]","Run "+halfMins+":00 @ "+pr+" [back]");}
+    if(ob){steps.push("Run "+halfMins+":00 @ "+pr,"Run "+halfMins+":00 @ "+pr);}
     else{steps.push("Run "+mins+":00 @ "+pr);}
     steps.push(wuLine);
     return steps;
@@ -295,17 +296,61 @@ function makeSteps(d, cfg) {
 }
 
 function makeIMW(plan, cfg, sel) {
-  const out=[];
-  plan.forEach(function(w){
-    w.days.forEach(function(d){
-      if(d.type==="rest"||d.type==="race"||!sel[d.date])return;
-      out.push("# Date: "+d.date);
-      out.push("# Name: "+icsEventName(d,cfg));
-      makeSteps(d,cfg).forEach(function(s){out.push(s);});
-      out.push("");
+  const u = cfg.units;
+  const ep    = spreadRange(getPace(cfg.vdot, "easy"),   SPREAD.easy);
+  const strPr = spreadRange(getPace(cfg.vdot, "stride"), SPREAD.stride);
+  const wu    = getWUCD(cfg);
+  const wuStr = wu.type === "dist"
+    ? wu.val + " " + u + " Warmup @ " + ep + "/" + u
+    : "10 min Warmup @ " + ep + "/" + u;
+  const cdStr = wu.type === "dist"
+    ? wu.val + " " + u + " Cooldown @ " + ep + "/" + u
+    : "10 min Cooldown @ " + ep + "/" + u;
+
+  function strideSeg(mode, onSec, offSec) {
+    if (mode === "distance") return "6× (150 m Run @ " + strPr + "/" + u + ", 150 m Walk)";
+    const on  = "0:" + (onSec  < 10 ? "0" : "") + onSec;
+    const off = "0:" + (offSec < 10 ? "0" : "") + offSec;
+    return "6× (" + on + " Run @ " + strPr + "/" + u + ", " + off + " Walk)";
+  }
+
+  const lines = [];
+  plan.forEach(function(w) {
+    w.days.forEach(function(d) {
+      if (d.type === "rest" || d.type === "race" || !sel[d.date]) return;
+      const pr   = spreadRange(d.pace, SPREAD[d.type] || 25);
+      const segs = [];
+
+      if (d.type === "easy" || d.type === "long") {
+        segs.push(d.dist + " " + u + " " + (d.type === "long" ? "Long" : "Easy") + " @ " + ep + "/" + u);
+        if (isOn(cfg.striders)) segs.push(strideSeg(cfg.stridersModeEasy || "time", 30, 45));
+
+      } else if (d.type === "tempo") {
+        const mins = tempoMins(d.dist, d.pace);
+        segs.push(wuStr);
+        if (isOn(cfg.preStridesToempo) || isOn(cfg.preStrides)) segs.push(strideSeg(cfg.stridersModeTempo || "time", 25, 35));
+        segs.push(mins + " min Tempo @ " + pr + "/" + u);
+        segs.push(cdStr);
+
+      } else if (d.type === "interval") {
+        const reps    = Number(cfg.reps) || 4;
+        const snapped = snapRep(d.dist / reps);
+        const label   = INTERVAL_LABELS[snapped] || snapped.toFixed(2) + " " + u;
+        const rst     = secToPace(calcRest(snapped, d.pace));
+        segs.push(wuStr);
+        if (isOn(cfg.preStridesInterval) || isOn(cfg.preStrides)) segs.push(strideSeg(cfg.stridersModeInterval || "time", 25, 35));
+        segs.push("Repeat " + reps + "× (" + label + " @ " + pr + "/" + u + ", " + rst + " Rest)");
+        segs.push(cdStr);
+
+      } else if (d.type === "prerace") {
+        segs.push(d.dist.toFixed(2) + " " + u + " Easy @ " + ep + "/" + u);
+        segs.push("4× (0:20 Run @ " + strPr + "/" + u + ", 0:30 Walk)");
+      }
+
+      if (segs.length) lines.push(d.date + " Run: " + segs.join("; "));
     });
   });
-  return out.join("\n").trim();
+  return lines.join("\n");
 }
 
 function pad2(n){return n<10?"0"+n:String(n);}
@@ -592,7 +637,7 @@ function Plan({ today, cfg, plan, wk, selWeek, setSelWeek, raceTimeStr }) {
           </div>
         `;
       })}
-      <div style=${{ display:"flex", gap:6, marginTop:12, flexWrap:"wrap" }}>
+      <div style=${{ display:"flex", gap:6, marginTop:12, flexWrap:"wrap", alignItems:"center" }}>
         ${plan.map((w, i) => {
           const cur = w.weekStart <= today && addDays(w.weekStart, 6) >= today;
           return html`
@@ -604,6 +649,12 @@ function Plan({ today, cfg, plan, wk, selWeek, setSelWeek, raceTimeStr }) {
             }}>${i + 1}</button>
           `;
         })}
+        ${(() => {
+          const ci = plan.findIndex(w => w.weekStart <= today && addDays(w.weekStart, 6) >= today);
+          return ci >= 0 && ci !== selWeek && html`
+            <button className="btn" style=${{ fontSize:11, padding:"6px 10px", color:"var(--color-text-info)", borderColor:"var(--color-border-info)" }}
+              onClick=${() => setSelWeek(ci)}>Today</button>`;
+        })()}
       </div>
     </div>
   `;
@@ -707,6 +758,7 @@ function Export({ today, cfg, plan, sel, setSel, selCount, raceTimeStr, selRace,
 
 function Settings({ cfg, setCfg, shareMsg, share }) {
   const [loc, setLoc] = useState(Object.assign({}, cfg));
+  const [applied, setApplied] = useState(false);
   const fN   = k => e  => setLoc(l => ({ ...l, [k]: Number(e.target.value) }));
   const fS   = k => e  => setLoc(l => ({ ...l, [k]: e.target.value }));
   const pick = (k, v) => () => setLoc(l => ({ ...l, [k]: v }));
@@ -714,6 +766,12 @@ function Settings({ cfg, setCfg, shareMsg, share }) {
   const DIST_OPTIONS = ["5k","8k","10k","15k","half","marathon","custom"];
   const previewSec  = getRaceTimeSec(loc.vdot, loc.rdist);
   const previewPace = getRacePaceMi(loc.vdot, loc.rdist, loc.units);
+  const dateError   = loc.race && loc.start && loc.race <= loc.start
+    ? "Race date must be after the plan start date." : null;
+  function apply() {
+    setCfg(Object.assign({}, loc));
+    setApplied(true); setTimeout(() => setApplied(false), 2000);
+  }
 
   return html`
     <div style=${{ padding:16 }}>
@@ -837,9 +895,10 @@ function Settings({ cfg, setCfg, shareMsg, share }) {
         </div>
       </div>
 
-      <button className="btn-primary" style=${{ width:"100%", marginBottom:10 }} onClick=${() => setCfg(Object.assign({}, loc))}>Apply changes</button>
+      ${dateError && html`<p style=${{ fontSize:12, color:"#b3261e", margin:"0 0 8px", textAlign:"center" }}>${dateError}</p>`}
+      <button className="btn-primary" style=${{ width:"100%", marginBottom:10, opacity:dateError ? 0.4 : 1 }} disabled=${!!dateError} onClick=${apply}>${applied ? "✓ Applied" : "Apply changes"}</button>
       <button className="btn" style=${{ width:"100%", marginBottom:4 }} onClick=${share}>Copy plan URL${shareMsg ? " — " + shareMsg : ""}</button>
-      <p style=${{ fontSize:11, color:"var(--color-text-secondary)", textAlign:"center", margin:"4px 0 0" }}>Bare URL = generic defaults · your config only in your link</p>
+      <p style=${{ fontSize:11, color:"var(--color-text-secondary)", textAlign:"center", margin:"4px 0 0" }}>Settings are saved on this device · share the URL to transfer them</p>
     </div>
   `;
 }
@@ -857,13 +916,21 @@ function App() {
   const [copied,   setCopied]   = useState(false);
   const today = new Date().toISOString().slice(0, 10);
 
+  useEffect(function() { window.scrollTo(0, 0); }, [tab]);
+
   useEffect(function() {
     const merged = Object.assign({}, DEFAULTS);
+    const numK = { vdot:1, slrd:1, dpw:1, lrd:1, taper:1, reps:1 };
+    // Saved config from a previous visit; URL params override it below.
+    try {
+      const saved = JSON.parse(localStorage.getItem("onpace.cfg") || "null");
+      if (saved && typeof saved === "object")
+        Object.keys(saved).forEach(function(k) { if (k in merged) merged[k] = saved[k]; });
+    } catch(e) {}
     try {
       const h = window.location.hash;
       if (h && h.length > 2) {
         const q = h.charAt(1) === "?" ? h.slice(2) : h.slice(1);
-        const numK = { vdot:1, slrd:1, dpw:1, lrd:1, taper:1, reps:1 };
         q.split("&").forEach(function(seg) {
           const eq = seg.indexOf("="); if (eq < 1) return;
           const k = seg.slice(0, eq), v = decodeURIComponent(seg.slice(eq + 1));
@@ -871,11 +938,15 @@ function App() {
         });
       }
     } catch(e) {}
+    Object.keys(numK).forEach(function(k) {
+      if (!isFinite(merged[k])) merged[k] = DEFAULTS[k];
+    });
     setCfg(merged);
   }, []);
 
   useEffect(function() {
     if (!cfg.race || !cfg.start) return;
+    try { localStorage.setItem("onpace.cfg", JSON.stringify(cfg)); } catch(e) {}
     const p = buildPlan(cfg); setPlan(p);
     let ci = -1;
     for (let i = 0; i < p.length; i++) {
