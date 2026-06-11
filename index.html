@@ -353,6 +353,79 @@ function makeIMW(plan, cfg, sel) {
   return lines.join("\n");
 }
 
+// ─── Garmin direct export (see garmin/DESIGN.md) ─────────────────────────────
+// Set to your deployed Cloudflare Worker URL to enable; empty disables the UI actions.
+const GARMIN_BACKEND = "";
+
+function paceToMps(paceStr, units, offsetSec) {
+  const meters = units === "km" ? 1000 : 1609.34;
+  return meters / (paceToSec(paceStr) + (offsetSec || 0));
+}
+// Garmin pace targets are m/s; low = slower bound, high = faster bound.
+function paceTarget(paceStr, units, spread) {
+  const h = Math.round((spread || 25) / 2);
+  return { targetType: "PACE", targetValueLow: paceToMps(paceStr, units, h), targetValueHigh: paceToMps(paceStr, units, -h) };
+}
+function gStep(order, intensity, durationType, durationValue, target) {
+  return Object.assign({ type:"WorkoutStep", stepOrder:order, intensity, durationType, durationValue }, target || {});
+}
+function distMeters(dist, units) { return Math.round(dist * (units === "km" ? 1000 : 1609.34)); }
+
+function makeGarminWorkouts(plan, cfg, sel) {
+  const u = cfg.units, out = [];
+  const easyPace   = getPace(cfg.vdot, "easy");
+  const stridePace = getPace(cfg.vdot, "stride");
+  const wu = getWUCD(cfg);
+  const wuDur = wu.type === "dist"
+    ? ["DISTANCE", distMeters(1, u)] : ["TIME", 600];
+
+  function strideRepeat(order, reps, onSec, offSec, mode) {
+    const steps = mode === "distance"
+      ? [gStep(1, "INTERVAL", "DISTANCE", 150, paceTarget(stridePace, u, SPREAD.stride)), gStep(2, "RECOVERY", "DISTANCE", 150)]
+      : [gStep(1, "INTERVAL", "TIME", onSec, paceTarget(stridePace, u, SPREAD.stride)), gStep(2, "RECOVERY", "TIME", offSec)];
+    return { type:"WorkoutRepeatStep", stepOrder:order, repeatType:"REPEAT_UNTIL_STEPS_CMPLT", repeatValue:reps, steps };
+  }
+
+  plan.forEach(function(w) {
+    w.days.forEach(function(d) {
+      if (d.type === "rest" || d.type === "race" || !sel[d.date]) return;
+      const steps = [];
+      let n = 1;
+
+      if (d.type === "easy" || d.type === "long") {
+        steps.push(gStep(n++, "INTERVAL", "DISTANCE", distMeters(d.dist, u), paceTarget(easyPace, u, SPREAD.easy)));
+        if (isOn(cfg.striders)) steps.push(strideRepeat(n++, 6, 30, 45, cfg.stridersModeEasy || "time"));
+
+      } else if (d.type === "tempo") {
+        steps.push(gStep(n++, "WARMUP", wuDur[0], wuDur[1], paceTarget(easyPace, u, SPREAD.easy)));
+        if (isOn(cfg.preStridesToempo) || isOn(cfg.preStrides)) steps.push(strideRepeat(n++, 6, 25, 35, cfg.stridersModeTempo || "time"));
+        steps.push(gStep(n++, "INTERVAL", "TIME", tempoMins(d.dist, d.pace) * 60, paceTarget(d.pace, u, SPREAD.tempo)));
+        steps.push(gStep(n++, "COOLDOWN", wuDur[0], wuDur[1], paceTarget(easyPace, u, SPREAD.easy)));
+
+      } else if (d.type === "interval") {
+        const reps = Number(cfg.reps) || 4, snapped = snapRep(d.dist / reps);
+        steps.push(gStep(n++, "WARMUP", wuDur[0], wuDur[1], paceTarget(easyPace, u, SPREAD.easy)));
+        if (isOn(cfg.preStridesInterval) || isOn(cfg.preStrides)) steps.push(strideRepeat(n++, 6, 25, 35, cfg.stridersModeInterval || "time"));
+        steps.push({ type:"WorkoutRepeatStep", stepOrder:n++, repeatType:"REPEAT_UNTIL_STEPS_CMPLT", repeatValue:reps, steps: [
+          gStep(1, "INTERVAL", "DISTANCE", distMeters(snapped, "mi"), paceTarget(d.pace, u, SPREAD.interval)),
+          gStep(2, "RECOVERY", "TIME", calcRest(snapped, d.pace)),
+        ]});
+        steps.push(gStep(n++, "COOLDOWN", wuDur[0], wuDur[1], paceTarget(easyPace, u, SPREAD.easy)));
+
+      } else if (d.type === "prerace") {
+        steps.push(gStep(n++, "INTERVAL", "DISTANCE", distMeters(d.dist, u), paceTarget(easyPace, u, SPREAD.easy)));
+        steps.push(strideRepeat(n++, 4, 20, 30, "time"));
+      }
+
+      if (steps.length) out.push({
+        date: d.date,
+        workout: { workoutName: icsEventName(d, cfg), sport: "RUNNING", steps },
+      });
+    });
+  });
+  return out;
+}
+
 function pad2(n){return n<10?"0"+n:String(n);}
 
 function makeICS(plan, cfg, sel, selRace) {
@@ -709,6 +782,26 @@ function Export({ today, cfg, plan, sel, setSel, selCount, raceTimeStr, selRace,
           </div>
           <pre style=${{ fontSize:11, color:"#c8d0e8", margin:0, padding:"10px 12px", whiteSpace:"pre-wrap", lineHeight:1.75, fontFamily:"monospace", maxHeight:200, overflowY:"auto" }}>${selCount === 0 ? "# No workouts selected." : imwText}</pre>
         </div>
+      </div>
+      <div className="card">
+        <p style=${{ fontSize:11, fontWeight:600, textAlign:"center", letterSpacing:"0.06em", textTransform:"uppercase", color:"var(--color-text-secondary)", margin:"0 0 8px" }}>Garmin Connect (direct)</p>
+        ${GARMIN_BACKEND ? html`
+          <button className="btn-primary" style=${{ width:"100%" }} disabled=${selCount === 0}
+            onClick=${() => {
+              fetch(GARMIN_BACKEND + "/api/workouts/push", {
+                method:"POST", credentials:"include",
+                headers:{ "Content-Type":"application/json" },
+                body: JSON.stringify({ workouts: makeGarminWorkouts(plan, cfg, sel) }),
+              }).then(r => {
+                if (r.status === 401) window.location.href = GARMIN_BACKEND + "/auth/login";
+                else if (!r.ok) throw new Error("push failed");
+              }).catch(e => alert("Garmin push failed: " + e.message));
+            }}>Push ${selCount} workout${selCount !== 1 ? "s" : ""} to Garmin</button>
+        ` : html`
+          <p style=${{ fontSize:11, color:"var(--color-text-secondary)", textAlign:"center", margin:0, lineHeight:1.5 }}>
+            Backend not configured. Requires Garmin Developer Program access and a deployed proxy — see <code>garmin/DESIGN.md</code>.
+          </p>
+        `}
       </div>
       <div style=${{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
         ${presets.map(([label, fn]) => html`
